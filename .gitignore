@@ -1,0 +1,34 @@
+# Source data (used for import only, not stored in repo)
+all-books-simple.zip
+all-books-svg.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Parser cache
+.parser_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Database
+*.db
+*.sqlite3
+
+# Environment
+.env
+.env.*
+
+# Claude Code local settings
+.claude/
