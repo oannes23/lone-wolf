@@ -91,20 +91,21 @@ def resolve_combat_round(combat_ratio, crt_data):
 7. Save combat_round snapshot row (with remaining endurance for both sides)
 8. Check for death (endurance ≤ 0 → killed)
 9. Check evasion eligibility (round >= evasion_after_rounds)
-10. Return round result
+10. Increment character.version (optimistic locking)
+11. Return round result
 ```
 
 ### Multi-Enemy Combat
 
-Some sections have multiple enemies fought sequentially. The `ordinal` field on `combat_encounters` determines fight order. The next enemy engages only after the current one is defeated.
+Some scenes have multiple enemies fought sequentially. The `ordinal` field on `combat_encounters` determines fight order. The next enemy engages only after the current one is defeated.
 
 ### Conditional Combat
 
 Some combat encounters are conditional — they only trigger when the character **lacks** a certain discipline or item (e.g., "If you do not have Camouflage, you must fight...").
 
 - **Decision**: `combat_encounters` has `condition_type` and `condition_value` columns. If the condition is met (character has the discipline/item), the combat is skipped entirely.
-- **Rationale**: Keeps conditional combat as a property of the encounter rather than requiring section restructuring.
-- **Implications**: The combat phase in the phase sequence checks the condition before engaging. If skipped, no `combat_start`/`combat_end` events are logged. A `combat_skipped` event type is logged instead.
+- **Rationale**: Keeps conditional combat as a property of the encounter rather than requiring scene restructuring.
+- **Implications**: The combat phase in the phase sequence checks the condition before engaging. If skipped, a `combat_skipped` event is logged instead of `combat_start`/`combat_end`.
 
 ```python
 def should_fight(encounter, character):
@@ -117,46 +118,69 @@ def should_fight(encounter, character):
     return True
 ```
 
+### Evasion Damage
+
+- **Decision**: Evasion damage is configurable per encounter via `evasion_damage` on `combat_encounters`.
+- **Rationale**: Some encounters deal damage when evading, others don't. Default is 0.
+
+```python
+def evade_combat(character, encounter):
+    character.endurance_current -= encounter.evasion_damage
+    character.active_combat_encounter_id = None
+    if character.endurance_current <= 0:
+        character.is_alive = False
+    return encounter.evasion_target, encounter.evasion_damage
+```
+
+### Foes as Game Objects
+
+Combat encounters reference foe game_objects via `foe_game_object_id`. Enemy stats (cs, end) are also stored inline on `combat_encounters` for direct gameplay use (denormalized from the game_object). The game_object link enables taxonomy queries like "in which scenes does this enemy appear?"
+
 ## State Machine
 
-### Section Phase System
+### Scene Phase System
 
-Each section has an ordered sequence of **phases** that the character must progress through. The phase sequence determines what happens when a character enters a section and what must be resolved before choices become available.
+Each scene has an ordered sequence of **phases** that the character must progress through. The phase sequence determines what happens when a character enters a scene and what must be resolved before choices become available.
 
 #### Phase Types
 
 | Phase | Description |
 |-------|-------------|
-| `items` | Item pickup/decline for one or more `section_items` with `action='gain'`. Player must accept or decline each item. |
-| `item_loss` | Automatic item removal (`section_items` with `action='lose'`). Applied without player action. |
-| `eat` | Meal check. Consumes a meal, uses Hunting discipline, or applies 3 END penalty. |
+| `items` | Item pickup/decline for one or more `scene_items` with `action='gain'`. Player must accept or decline each item. Inventory management (drop/equip/unequip) is available during this phase for swapping. |
+| `item_loss` | Automatic item removal (`scene_items` with `action='lose'`). Applied without player action. If the character doesn't have the item, skip silently and log an `item_loss_skip` event. |
+| `backpack_loss` | Automatic removal of all backpack items and meals. Triggered when `scene.loses_backpack` is true. |
+| `eat` | Meal check. Consumes a meal (from `characters.meals` counter), uses Hunting discipline, or applies 3 END penalty. |
 | `combat` | Combat encounter. Player fights one enemy to completion (win, loss, or evasion). |
 | `random` | Random number roll. Player clicks to roll; server generates number and applies outcome. |
-| `heal` | Healing discipline tick. +1 END if Healing discipline present and no combat occurred in this section (evasion counts as combat — no healing). Auto-applied. |
+| `heal` | Healing discipline tick. +1 END if Healing discipline present and no combat occurred in this scene (evasion counts as combat — no healing). Capped at `endurance_max`. Auto-applied. |
 | `choices` | Terminal phase. Player can now select from available choices. Always the final phase. |
 
 #### Phase Sequence Resolution
 
-The phase sequence is determined per-section using a hybrid approach:
+The phase sequence is determined per-scene using a hybrid approach:
 
-1. **Override**: If `sections.phase_sequence_override` is non-null, use that JSON array directly.
-2. **Computed default**: Otherwise, build the sequence from the section's content:
+1. **Override**: If `scenes.phase_sequence_override` is non-null, use that JSON array directly.
+2. **Computed default**: Otherwise, build the sequence from the scene's content:
 
 ```python
-def compute_phase_sequence(section, section_items, combat_encounters):
+def compute_phase_sequence(scene, scene_items, combat_encounters):
     phases = []
 
-    # Item losses are applied first (automatic)
-    if any(si for si in section_items if si.action == 'lose'):
+    # Backpack loss applied first if flagged
+    if scene.loses_backpack:
+        phases.append({"type": "backpack_loss"})
+
+    # Item losses are applied next (automatic, silent skip if missing)
+    if any(si for si in scene_items if si.action == 'lose'):
         phases.append({"type": "item_loss"})
 
     # Items available for pickup
-    gain_items = [si for si in section_items if si.action == 'gain']
+    gain_items = [si for si in scene_items if si.action == 'gain']
     if gain_items:
         phases.append({"type": "items", "item_ids": [si.id for si in gain_items]})
 
     # Eat check
-    if section.must_eat:
+    if scene.must_eat:
         phases.append({"type": "eat"})
 
     # Combat encounters (in ordinal order) — conditional combats included;
@@ -164,56 +188,62 @@ def compute_phase_sequence(section, section_items, combat_encounters):
     for encounter in sorted(combat_encounters, key=lambda e: e.ordinal):
         phases.append({"type": "combat", "encounter_id": encounter.id})
 
-    # Random phase (if section has random_outcomes)
-    if has_random_outcomes(section):
+    # Random phase (if scene has random_outcomes)
+    if has_random_outcomes(scene):
         phases.append({"type": "random"})
 
-    # Healing (only if no combat phases — evasion counts as combat)
-    if not combat_encounters:
-        phases.append({"type": "heal"})
+    # Healing always included in sequence. At runtime, should_heal() checks
+    # whether combat actually occurred (including conditional combats that were skipped).
+    phases.append({"type": "heal"})
 
     # Choices are always the terminal phase
     phases.append({"type": "choices"})
     return phases
 ```
 
-Sections with non-standard flow (e.g., items found after combat) use the `phase_sequence_override` column. The parser detects these from narrative position; admin can correct them.
+Scenes with non-standard flow (e.g., items found after combat) use the `phase_sequence_override` column. The parser detects these from narrative position; admin can correct them.
 
 #### Phase Progression
 
-The character's position in the phase sequence is tracked by `section_phase` and `section_phase_index` on the `characters` table.
+The character's position in the phase sequence is tracked by `scene_phase` and `scene_phase_index` on the `characters` table.
 
 ```
-1. Character enters section T
-2. Compute phase sequence for T
-3. Set section_phase_index = 0, section_phase = first phase type
-4. For each phase:
+1. Character enters scene T
+2. If scene T has is_death=true: skip all phases, mark is_alive=false, log death event, return. Narrative is shown but no phases run.
+3. Compute phase sequence for T
+4. Set scene_phase_index = 0, scene_phase = first phase type
+5. For each phase:
    a. If phase requires player action (items, combat, random, choices): wait for API call
-   b. If phase is automatic (item_loss, eat, heal): apply immediately, log character_event, advance
-5. When all phases complete except choices: section_phase = 'choices'
-6. Player can now make a choice → transitions to new section, restart from step 1
+   b. If phase is automatic (item_loss, backpack_loss, eat, heal): apply immediately, log character_event, advance
+   c. For item_loss: if character doesn't have the item, skip silently and log item_loss_skip event
+6. When all phases complete except choices: scene_phase = 'choices'
+7. Player can now make a choice → transitions to new scene, restart from step 1
+8. Increment character.version after each state mutation
 ```
+
+**Automatic phase results**: Since `eat` and `heal` (and `item_loss`, `backpack_loss`) are automatic, their results are reported in the `phase_results` array on the scene response. The client never sees `scene_phase = "eat"` — by the time it reads the scene, automatic phases have already resolved.
 
 Each phase completion logs a `character_event` with the phase type and details.
 
 #### Blocking Rules
 
-- **Items phase**: Player must accept or decline EVERY pending item before advancing. API returns `409` if player attempts to choose or advance with unresolved items.
+- **Items phase**: Player must accept or decline EVERY pending item before advancing. API returns `409` if player attempts to choose or advance with unresolved items. Player CAN use the inventory endpoint (drop/equip/unequip) during this phase to make room for new items.
 - **Combat phase**: Player must complete combat (win, loss, or evade) before advancing. `active_combat_encounter_id` is set on the character.
 - **Random phase**: Player must click to roll before advancing.
-- **Choices phase**: Player selects a choice, which triggers transition to the next section.
+- **Choices phase**: Player selects a choice, which triggers transition to the next scene.
 
-### Section Transition
+### Scene Transition
 
 ```
-1. Player at section S in 'choices' phase
+1. Player at scene S in 'choices' phase
 2. Filter choices by availability (see below)
-3. Player selects choice Ci → target section T
+3. Player selects choice Ci → target scene T
 4. Log decision (character_id, S, T, Ci, run_number)
-5. Move character to section T
+5. Move character to scene T
 6. Compute phase sequence for T
 7. Begin phase progression for T
-8. Return new section state (with current phase info)
+8. Increment character.version
+9. Return new scene state (with current phase info)
 ```
 
 ### Choice Filtering
@@ -225,19 +255,63 @@ Each choice may have a condition. The engine evaluates availability:
 | `discipline` | Character has the named discipline |
 | `item` | Character has the named item |
 | `gold` | Character has ≥ N gold crowns |
-| `random` | Always available — presented as a "click to roll" button. Range in `condition_value` (e.g., `0-4`) determines outcome mapping. |
+| `random` | Always available — presented as a "click to roll" button. Range in `condition_value` determines outcome mapping. |
 | `none` / `null` | Always available |
+
+**Compound conditions**: When `condition_value` is JSON (e.g., `{"any": ["Tracking", "Huntmastery"]}`), the engine evaluates the compound logic:
+
+```python
+def check_condition(character, condition_type, condition_value):
+    if condition_type is None:
+        return True
+
+    # Parse compound conditions
+    if isinstance(condition_value, str) and condition_value.startswith('{'):
+        parsed = json.loads(condition_value)
+        if 'any' in parsed:
+            return any(
+                check_single_condition(character, condition_type, v)
+                for v in parsed['any']
+            )
+
+    return check_single_condition(character, condition_type, condition_value)
+
+def check_single_condition(character, condition_type, value):
+    if condition_type == 'discipline':
+        return has_discipline(character, value)
+    elif condition_type == 'item':
+        return has_item(character, value)
+    elif condition_type == 'gold':
+        return character.gold >= int(value)
+    elif condition_type == 'random':
+        return True
+    return True
+```
 
 All choices are returned to the client, including unavailable ones (with `available: false` and the condition displayed), so the player can see what they're missing.
 
-### Death Sections
+### Death Scenes
 
-Sections with `is_death = true` end the adventure. The character is marked `is_alive = false`. A `death` action is logged in both the decision log and the character events table.
+Scenes with `is_death = true` end the adventure **immediately on entry**. The entire phase sequence is skipped — no items, eat, combat, or heal phases run. The character is marked `is_alive = false`. A `death` action is logged in both the decision log and the character events table. The narrative is shown to the player, but the only available action is restart.
+
+```python
+def enter_scene(character, scene):
+    if scene.is_death:
+        character.is_alive = False
+        character.scene_phase = None
+        character.scene_phase_index = None
+        character.active_combat_encounter_id = None
+        character.version += 1
+        log_decision(character, action_type='death')
+        log_character_event(character, scene, event_type='death')
+        return  # no phases run
+    # ... normal phase progression
+```
 
 ### Death and Restart
 
 - **Decision**: On death, the character can restart from the beginning of the current book.
-- **Rationale**: Matches the book experience (you'd flip back to section 1) while preserving all history for analytics.
+- **Rationale**: Matches the book experience (you'd flip back to scene 1) while preserving all history for analytics.
 - **Implications**:
   - A `character_book_starts` snapshot is saved at the beginning of each book (after discipline selection and inventory adjustment)
   - On restart: restore character from snapshot, increment `death_count` and `current_run`, log a `restart` action
@@ -248,72 +322,141 @@ Sections with `is_death = true` end the adventure. The character is marked `is_a
 def restart_character(character, snapshot):
     character.combat_skill_base = snapshot.combat_skill_base
     character.endurance_base = snapshot.endurance_base
+    character.endurance_max = snapshot.endurance_max
     character.endurance_current = snapshot.endurance_current
     character.gold = snapshot.gold
     character.meals = snapshot.meals
     character.is_alive = True
     character.death_count += 1
     character.current_run += 1
-    character.current_section_id = first_section_of_book(character.book_id)
+    character.current_scene_id = first_scene_of_book(character.book_id)
     character.active_combat_encounter_id = None
-    character.section_phase = None
-    character.section_phase_index = None
-    character.wizard_step = None
+    character.scene_phase = None
+    character.scene_phase_index = None
+    character.active_wizard_id = None
+    character.version += 1
     restore_items(character, snapshot.items_json)
     restore_disciplines(character, snapshot.disciplines_json)
 ```
 
-### Healing and Evasion
+### Endurance Max
 
-- **Decision**: Evasion counts as combat occurring. No healing applies in sections where the character evaded combat.
-- **Rationale**: Matches the books' intent that healing is for peaceful sections. Even partial combat (fighting then fleeing) is still combat.
+Endurance is tracked with three values:
+- `endurance_base`: The rolled base value (e.g., 20 + random). Set at character creation, may change on era transitions.
+- `endurance_max`: The effective maximum (base + permanent bonuses). Lore-circle bonuses increase this value. Healing caps here.
+- `endurance_current`: The current health. Can never exceed `endurance_max`.
 
 ```python
-def should_heal(character, section_phases_completed):
+def compute_endurance_max(endurance_base, disciplines):
+    max_end = endurance_base
+    max_end += lore_circle_end_bonus(disciplines)
+    # Other permanent bonuses could add here
+    return max_end
+```
+
+Endurance max is recalculated when disciplines change (new discipline learned, book transition). The value is stored on the character for fast reads and snapshotted in `character_book_starts`.
+
+### Healing and Evasion
+
+- **Decision**: Evasion counts as combat occurring. No healing applies in scenes where the character evaded combat.
+- **Rationale**: Matches the books' intent that healing is for peaceful scenes. Even partial combat (fighting then fleeing) is still combat.
+
+```python
+def apply_healing(character, scene_phases_completed):
+    if not should_heal(character, scene_phases_completed):
+        return 0
+    bonus = get_healing_bonus(character)
+    actual = min(bonus, character.endurance_max - character.endurance_current)
+    character.endurance_current += actual
+    character.version += 1
+    return actual
+
+def should_heal(character, scene_phases_completed):
     combat_occurred = any(
         p["type"] == "combat" and p.get("result") in ("win", "evasion")
-        for p in section_phases_completed
+        for p in scene_phases_completed
     )
     return not combat_occurred
 ```
 
-### Victory Sections
+### Victory Scenes
 
-Sections with `is_victory = true` complete the current book. The character can then advance to the next book via the book advance wizard, or **replay the current book**.
+Scenes with `is_victory = true` complete the current book. The character can then advance to the next book via the book advance wizard, or **replay the current book**.
 
 ### Book Replay
 
-- **Decision**: Players can replay the current book instead of advancing after reaching a victory section.
+- **Decision**: Players can replay the current book instead of advancing after reaching a victory scene.
 - **Rationale**: Allows completionists to explore different paths without creating a new character.
 - **Implications**:
   - Replay resets to the `character_book_starts` snapshot (same as death restart)
   - Increments `current_run` (but NOT `death_count`)
   - Logs a `replay` action in `decision_log` and a `replay` event in `character_events`
-  - Available only when `is_victory = true` on current section and character hasn't entered the advance wizard
+  - Available only when `is_victory = true` on current scene and character hasn't entered the advance wizard
 
 ```python
 def replay_book(character, snapshot):
     """Replay current book from beginning. Same as death restart but without incrementing death_count."""
     character.combat_skill_base = snapshot.combat_skill_base
     character.endurance_base = snapshot.endurance_base
+    character.endurance_max = snapshot.endurance_max
     character.endurance_current = snapshot.endurance_current
     character.gold = snapshot.gold
     character.meals = snapshot.meals
     character.is_alive = True
     character.current_run += 1
     # death_count NOT incremented
-    character.current_section_id = first_section_of_book(character.book_id)
+    character.current_scene_id = first_scene_of_book(character.book_id)
     character.active_combat_encounter_id = None
-    character.section_phase = None
-    character.section_phase_index = None
-    character.wizard_step = None
+    character.scene_phase = None
+    character.scene_phase_index = None
+    character.active_wizard_id = None
+    character.version += 1
     restore_items(character, snapshot.items_json)
     restore_disciplines(character, snapshot.disciplines_json)
 ```
 
+## Generic Wizard System
+
+Both character creation and book advance use the same data-driven wizard infrastructure. Wizard templates define step sequences; wizard progress tracks the character's position.
+
+### Wizard Flow
+
+```
+1. Wizard is initiated (creation finalize or victory → advance)
+2. character_wizard_progress row created, current_step_index = 0
+3. character.active_wizard_id set to the progress row
+4. For each step:
+   a. GET endpoint returns current step type, config, and available options
+   b. POST endpoint submits the step's choice
+   c. Choice is validated and stored in progress.state JSON
+   d. current_step_index incremented
+5. On final step (confirm): wizard completes
+   a. State is applied to character (disciplines, items, stats)
+   b. progress.completed_at set
+   c. character.active_wizard_id cleared
+   d. character_book_starts snapshot saved (for book advance)
+```
+
+### Wizard State
+
+The `active_wizard_id` column on `characters` replaces the old `wizard_step` column. It points to the `character_wizard_progress` row, which tracks:
+- Which template is being used
+- Current step index
+- Accumulated state (JSON blob of all choices so far)
+
+### Starting Scene
+
+The starting scene for a book is data-driven via `books.start_scene_number` (default 1). When a character starts or restarts a book, they are placed at this scene.
+
+```python
+def first_scene_of_book(book_id):
+    book = get_book(book_id)
+    return get_scene_by_number(book_id, book.start_scene_number)
+```
+
 ## Book Advance Wizard
 
-Multi-step process for transitioning between books.
+Multi-step process for transitioning between books. Uses the generic wizard system with template name `book_advance`.
 
 ### Wizard Steps
 
@@ -331,20 +474,10 @@ Step 2: Inventory Adjustment
 Step 3: Confirmation
   - Server shows summary of new character state
   - Player confirms
-  - Character moves to section 1 of the new book
+  - Character moves to start scene of the new book
   - New character_book_starts snapshot is saved
+  - endurance_max recalculated with new disciplines
 ```
-
-### Wizard State
-
-The wizard step is tracked explicitly via the `wizard_step` column on `characters`:
-
-- `null` — not in wizard
-- `discipline` — step 1: picking new disciplines
-- `inventory` — step 2: adjusting inventory for carry-over limits
-- `confirm` — step 3: reviewing summary before advancing
-
-The wizard is entered when the character reaches a victory section and the player calls `GET /gameplay/{character_id}/advance-book`. The `wizard_step` is set to `discipline` (or `inventory` if no new disciplines are needed). It advances with each `POST` and is cleared to `null` when the wizard completes.
 
 ### Carry-over Rules
 
@@ -358,8 +491,6 @@ Defined per book transition in the `book_transition_rules` table:
 | Magnakai → Grand Master (12→13) | Base CS = 15 + random, END = 25 + random. Pick 4 Grand Master disciplines. Keep select items. |
 | Grand Master → New Order (20→21) | New character (Kai Lord in training). Some carry-over mechanics. |
 
-Exact rules per book pair are defined in `book_transition_rules` table, populated via parser or admin.
-
 ## Inventory Constraints
 
 ### Weapons
@@ -370,9 +501,9 @@ Exact rules per book pair are defined in `book_transition_rules` table, populate
 
 ### Backpack Items
 
-- **Maximum**: 8 items (including meals)
-- Meals are backpack items
-- If backpack is lost, all backpack items and meals are lost
+- **Maximum**: 8 items
+- Meals are NOT backpack items — they are tracked separately as a counter on the character
+- If backpack is lost (`loses_backpack` scene flag), all backpack-type items are removed
 
 ### Special Items
 
@@ -383,23 +514,69 @@ Exact rules per book pair are defined in `book_transition_rules` table, populate
 ### Gold Crowns
 
 - **Maximum**: 50 gold crowns (belt pouch)
-- Excess gold must be left behind
+- On pickup, partial acceptance up to cap is auto-applied (no player decision needed)
 
 ### Pickup Logic
 
 ```python
+def pickup_gold(character, amount):
+    """Accept gold up to the 50-crown cap. Returns actual amount taken."""
+    actual = min(amount, 50 - character.gold)
+    character.gold += actual
+    character.version += 1
+    return actual
+
 def can_pickup(character, item_name, item_type):
     if item_type == "weapon":
         return count_weapons(character) < 2
     elif item_type == "backpack":
         return count_backpack(character) < 8
     elif item_type == "gold":
-        return character.gold < 50
+        return True  # partial acceptance handled by pickup_gold
     elif item_type == "special":
         return True  # story grants these
     elif item_type == "meal":
-        return count_backpack(character) < 8
+        return True  # meals are a counter, always accepted
 ```
+
+### Backpack Loss
+
+```python
+def apply_backpack_loss(character):
+    """Remove all backpack items and meals. Called when scene has loses_backpack=true."""
+    remove_all_items_of_type(character, 'backpack')
+    character.meals = 0
+    character.version += 1
+```
+
+### Item Loss Skip
+
+```python
+def apply_item_loss(character, item_name, item_type):
+    """Remove an item. If character doesn't have it, skip silently and return False."""
+    if has_item(character, item_name):
+        remove_item(character, item_name)
+        character.version += 1
+        return True  # item was removed
+    else:
+        return False  # skipped — log item_loss_skip event
+```
+
+## Optimistic Locking
+
+The `version` column on characters prevents concurrent modification (e.g., two browser tabs).
+
+```python
+def check_version(character, expected_version):
+    """Raises ConflictError if version doesn't match."""
+    if character.version != expected_version:
+        raise ConflictError(
+            f"Character state has changed. Please refresh and retry.",
+            current_version=character.version
+        )
+```
+
+Every state-mutating engine function increments `character.version` after applying changes. The API layer checks the version before applying, returning 409 on mismatch.
 
 ## Discipline Effects
 
@@ -410,10 +587,10 @@ def can_pickup(character, item_name, item_type):
 | Discipline | Mechanical Effect |
 |------------|-------------------|
 | Camouflage | Unlocks discipline-gated choices |
-| Hunting | No meal required when instructed to eat |
+| Hunting | No meal required when instructed to eat (uses `characters.meals` counter bypass) |
 | Sixth Sense | Unlocks discipline-gated choices |
 | Tracking | Unlocks discipline-gated choices |
-| Healing | +1 END on section entry if no combat in section (up to base END). Applied after all other phases resolve. |
+| Healing | +1 END on scene entry if no combat in scene (up to `endurance_max`). Applied after all other phases resolve. |
 | Weaponskill | +2 CS when equipped weapon's category matches chosen type (via `weapon_categories` table) |
 | Mindshield | Immune to enemy Mindblast attacks (no END loss) |
 | Mindblast | +2 CS in combat (unless enemy is immune) |
@@ -428,7 +605,7 @@ def can_pickup(character, item_name, item_type):
 |------------|-------------------|
 | Weaponmastery | +3 CS with mastered weapon (pick 3 weapon types) |
 | Animal Control | Unlocks choices + situational combat bonuses |
-| Curing | +1 END per section without combat; can cure disease/poison |
+| Curing | +1 END per scene without combat (up to `endurance_max`); can cure disease/poison |
 | Invisibility | Unlocks choices (enhanced Camouflage) |
 | Huntmastery | No meal needed + enhanced tracking; +2 CS in wild |
 | Pathsmanship | Unlocks choices (enhanced Tracking) |
@@ -437,14 +614,14 @@ def can_pickup(character, item_name, item_type):
 | Nexus | Unlocks choices (combines Sixth Sense + enhanced awareness) |
 | Divination | Unlocks choices; reveals hidden information |
 
-**Lore-circles**: Completing all disciplines in a circle grants stat bonuses.
+**Lore-circles**: Completing all disciplines in a circle grants stat bonuses. END bonuses increase `endurance_max`.
 
 | Circle | Disciplines | Bonus |
 |--------|-------------|-------|
-| Circle of Fire | Weaponmastery, Huntmastery | +1 CS, +2 END |
-| Circle of Light | Animal Control, Curing | +3 END |
-| Circle of Solaris | Invisibility, Pathsmanship, Divination | +1 CS, +3 END |
-| Circle of the Spirit | Psi-surge, Psi-screen, Nexus | +3 CS, +3 END |
+| Circle of Fire | Weaponmastery, Huntmastery | +1 CS, +2 END (to max) |
+| Circle of Light | Animal Control, Curing | +3 END (to max) |
+| Circle of Solaris | Invisibility, Pathsmanship, Divination | +1 CS, +3 END (to max) |
+| Circle of the Spirit | Psi-surge, Psi-screen, Nexus | +3 CS, +3 END (to max) |
 
 ### Grand Master Era (Books 13–20)
 
@@ -454,7 +631,7 @@ Further evolved disciplines with stronger effects. Base stats: CS = 15 + random,
 |------------|-------------------|
 | Grand Weaponmastery | +5 CS with mastered weapon type. Pick from expanded weapon list. |
 | Animal Mastery | Enhanced Animal Control. Unlocks choices + stronger combat bonuses in wild encounters. |
-| Deliverance | Enhanced Curing. +2 END per section without combat. Can neutralize any poison/disease. |
+| Deliverance | Enhanced Curing. +2 END per scene without combat (up to `endurance_max`). Can neutralize any poison/disease. |
 | Assimilance | Enhanced Invisibility. Unlocks choices + can mimic appearance/voice. |
 | Grand Huntmastery | No meal needed. +3 CS in wilderness combat. Enhanced tracking/navigation. |
 | Grand Pathsmanship | Enhanced Pathsmanship. Unlocks choices + danger sense in travel. |
@@ -494,14 +671,14 @@ Lone Wolf training new Kai Lords. New character with some carry-over mechanics.
 
 ## Per-Character Rule Configuration
 
-Characters have a `rule_overrides` JSON column for per-character rule variants. This allows different characters to use different rule interpretations.
+Characters have a `rule_overrides` JSON column for per-character rule variants.
 
 ### Discipline Stacking Mode
 
 - **Decision**: Configurable per character. Default: `"stack"`.
-- **Rationale**: The books are ambiguous about whether tiered discipline effects stack. Making it configurable lets players choose their preferred interpretation.
+- **Rationale**: The books are ambiguous about whether tiered discipline effects stack.
 - **Options**:
-  - `"stack"` — All tiers add their bonuses. Healing (+1) + Curing (+1) + Deliverance (+2) = +4 END per section without combat.
+  - `"stack"` — All tiers add their bonuses. Healing (+1) + Curing (+1) + Deliverance (+2) = +4 END per scene without combat.
   - `"highest"` — Only the most advanced tier applies. Deliverance alone gives +2 END.
 
 ```python
@@ -518,11 +695,7 @@ def get_healing_bonus(character):
         return sum(tiers)
     else:  # "highest"
         return max(tiers) if tiers else 0
-```
 
-The same pattern applies to CS bonuses from Mindblast → Psi-surge → Kai-surge and Weaponskill → Weaponmastery → Grand Weaponmastery.
-
-```python
 def get_rule(character, key, default=None):
     overrides = json.loads(character.rule_overrides or '{}')
     return overrides.get(key, default)
@@ -530,7 +703,7 @@ def get_rule(character, key, default=None):
 
 ## Weapon Category Matching
 
-Weaponskill/Weaponmastery bonuses use **category-based matching** rather than exact name matching. The `weapon_categories` table maps weapon names to categories.
+Weaponskill/Weaponmastery bonuses use **category-based matching**. The `weapon_categories` table maps weapon names to categories.
 
 ```python
 def weapon_category_matches(equipped_weapon_name, skill_weapon_type):
@@ -549,11 +722,13 @@ Example categories:
 - **Quarterstaff**: Quarterstaff, Staff
 - **Warhammer**: Warhammer
 
-The parser seeds this table from known weapon names in the XHTML. Admin can add/correct entries as new weapons are encountered.
-
 ## Meal Mechanics
 
-When a section has `must_eat = true`:
+Meals are tracked as an integer counter on `characters.meals` — they are NOT inventory items and do NOT count against the backpack limit.
+
+**Eating is fully automatic** during phase progression. There is no dedicated eat endpoint. When the `eat` phase is reached, the server auto-applies meal logic and the result is included in `phase_results` on the scene response.
+
+When a scene has `must_eat = true`:
 
 ```python
 def eat_meal(character):
@@ -561,26 +736,29 @@ def eat_meal(character):
         return 0  # no meal consumed, no END loss
     elif character.meals > 0:
         character.meals -= 1
+        character.version += 1
         return 0  # no END loss
     else:
         character.endurance_current -= 3
+        character.version += 1
         return -3  # lost 3 END
 ```
 
 ## Random Number Mechanics
 
-There are **two distinct random mechanics** in the game:
+There are **three distinct random mechanics** in the game. All three auto-apply effects immediately via the `/roll` endpoint. `requires_confirm` in the response is a **UI-only hint** — the client shows the result and the player clicks a confirm button to proceed, but no server call is needed for the confirm.
 
-### Phase-Based Random (In-Section Effects)
+### 1. Phase-Based Random (Background In-Scene Effects)
 
-Used when a section instructs the player to "pick a number from the Random Number Table" and applies an effect based on the result (gold change, END change, item gain/loss, or redirect to another section).
+Used when a scene instructs the player to "pick a number from the Random Number Table" and applies an effect based on the result. The narrative might say "roll, if you get 0 lose all your gold" — the effect is auto-applied and the result is shown in the narrative.
 
-- **Data**: `random_outcomes` table stores outcome bands per section (range_min, range_max, effect_type, effect_value, narrative_text)
-- **Flow**: Player is in the `random` phase → clicks "Roll" → server generates number → engine matches to outcome band → applies effect → logs `random_roll` character event → shows result with narrative text → player clicks "Continue"
-- **UI**: "Show then confirm" pattern. After rolling, display the result and outcome description. Player clicks "Continue" to proceed (or to be redirected if effect_type is `section_redirect`).
+- **Data**: `random_outcomes` table stores outcome bands per scene
+- **Phase**: `random` phase is added to the phase sequence
+- **Flow**: Player is in the `random` phase → clicks "Roll" → server generates number → engine matches to outcome band → applies effect → logs `random_roll` character event → returns result with narrative text
+- **Scene redirect**: When `effect_type='scene_redirect'`, remaining automatic phases (heal) complete first. The redirect then fires in place of the choices phase.
 
 ```python
-def resolve_random_phase(section_id, random_outcomes):
+def resolve_random_phase(scene_id, random_outcomes):
     number = random.randint(0, 9)
     for outcome in random_outcomes:
         if outcome.range_min <= number <= outcome.range_max:
@@ -588,16 +766,16 @@ def resolve_random_phase(section_id, random_outcomes):
     raise ValueError(f"No outcome band covers number {number}")
 ```
 
-### Choice-Based Random (Section Branching)
+### 2. Scene-Level Random Exits (No Player Choice)
 
-Used when multiple choices each have `condition_type='random'` with a number range in `condition_value` (e.g., `"0-4"`). The player rolls once, and the engine routes to the matching choice's target section.
+Used when ALL choices in a scene have `condition_type='random'` with number ranges. The player doesn't decide — they just roll, and the result determines which scene they go to.
 
 - **Data**: Multiple `choices` rows with `condition_type='random'` and `condition_value` like `"0-4"`, `"5-9"`
-- **Flow**: Section shows "Roll the dice" button → server generates number → engine finds the choice whose range contains the number → shows result and selected path → player clicks "Continue" → navigates to target section
-- **UI**: Same "show then confirm" pattern. Display the roll result and which path was selected. Player clicks "Continue" to navigate.
+- **Phase**: `random` phase is added to the phase sequence (detected when all choices are random-gated)
+- **Flow**: Scene shows "Roll" button → server generates number → engine finds the choice whose range contains the number → auto-transitions to target scene → returns new scene state
 
 ```python
-def resolve_random_choice(choices, random_number):
+def resolve_random_exit(choices, random_number):
     for choice in choices:
         if choice.condition_type == 'random':
             range_min, range_max = parse_range(choice.condition_value)
@@ -606,15 +784,48 @@ def resolve_random_choice(choices, random_number):
     raise ValueError(f"No random choice covers number {random_number}")
 ```
 
-### Server-Side Generation
+**Mixed scenes**: A scene can have both condition-gated choices (discipline/item) and random-exit choices. The UI shows available choices alongside a roll button for the random ones.
 
-- **Decision**: All random numbers are server-generated using `random.randint(0, 9)`.
-- **Rationale**: Prevents cheating. The books' "Random Number Table" is replaced by server-side generation.
-- The generated number is always returned in responses for transparency.
+### 3. Choice-Triggered Random (Choose Then Roll)
+
+Used when a specific choice leads to a roll with multiple possible outcomes. The player first selects a choice (e.g., "try to run away"), then rolls to determine the actual result.
+
+- **Data**: The parent choice has `target_scene_id = null`. Outcome bands are stored in the `choice_random_outcomes` table (choice_id FK, range_min, range_max, target_scene_id, narrative_text).
+- **Phase**: Occurs during the `choices` phase. No separate `random` phase needed.
+- **Flow**: Player selects the choice via `/choose` → server detects `choice_random_outcomes` exist → returns `requires_roll: true` with outcome bands → player calls `/roll` → server generates number → matches to outcome band → auto-transitions to target scene
+
+```python
+def resolve_choice_triggered_random(choice_random_outcomes):
+    number = random.randint(0, 9)
+    for outcome in choice_random_outcomes:
+        if outcome.range_min <= number <= outcome.range_max:
+            return outcome
+    raise ValueError(f"No outcome band covers number {number}")
+```
 
 ## Character Creation
 
-Two-phase process: roll stats (repeatable), then finalize.
+Uses the generic wizard system with template name `character_creation`.
+
+### Wizard Steps
+
+```
+Step 1: Stat Roll (repeatable)
+  - POST /characters/roll → returns roll_token (JWT with stats)
+  - Can reroll as many times as desired
+  - No character persisted yet
+
+Step 2: Finalize
+  - POST /characters with roll_token, name, book_id, discipline_ids, weapon_skill_type
+  - Character created with active_wizard_id set
+  - character_book_starts snapshot saved
+
+Step 3: Equipment Selection
+  - POST /characters/{id}/equip with equipment choices
+  - Equipment list from book_starting_equipment table
+  - Wizard completes, active_wizard_id cleared
+  - Character is now playable
+```
 
 ### Stat Rolling
 
@@ -629,18 +840,19 @@ def roll_stats(era: str) -> dict:
     }
 ```
 
-- **Decision**: Players can reroll stats as many times as they want before finalizing, but cannot choose their numbers.
-- **Rationale**: Avoids the tedious delete-and-recreate loop for bad rolls while preserving the randomness the books intended.
-- Rolled stats are encoded in a JWT `roll_token` signed with the app secret, with a 1-hour expiry. The finalize step validates this token to ensure stats were server-generated.
-- The roll endpoint is stateless — no DB writes until finalization.
-- Character creation respects the `users.max_characters` limit (default: 3). Returns `400` if the limit is reached.
+- Rolled stats are encoded in a JWT `roll_token` with 1-hour expiry
+- The roll endpoint is stateless — no DB writes until finalization
+- Character creation respects the `users.max_characters` limit (default: 3)
+- `endurance_max` is computed from `endurance_base` + lore-circle bonuses at creation
 
 ## Book Transitions
 
-When completing a book (reaching a victory section), the character advances via the multi-step wizard:
+When completing a book (reaching a victory scene), the character advances via the book advance wizard:
 
 - **Stats**: CS and END base values carry over (unless era transition overrides them)
 - **Items**: Carry-over limits defined per transition in `book_transition_rules`
 - **Disciplines**: All learned disciplines carry over; player picks new disciplines per rules
 - **Gold**: Carries over if allowed (still capped at 50)
+- **Endurance max**: Recalculated with new discipline set
 - **Snapshot**: A new `character_book_starts` snapshot is saved after the wizard completes
+- **Start scene**: Character placed at `books.start_scene_number` of the new book

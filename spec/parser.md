@@ -10,13 +10,15 @@ Source data comes from `all-books-simple.zip`, which contains both text and illu
 
 Each book is a single XHTML file (`en/xhtml-simple/lw/{slug}.htm`) containing:
 
-- **Front matter**: title, dedication, story background, game rules, discipline descriptions, equipment rules
-- **Numbered sections**: ~350 per book, each in a `<div class="numbered">` block
+- **Front matter**: title, dedication, story background, game rules, discipline descriptions, equipment rules, starting equipment list
+- **Numbered sections**: ~350 per book, each in a `<div class="numbered">` block (these become "scenes" in our data model)
 - **Illustrations**: `<img>` elements within sections
 - **Combat Results Table**: `<table>` under `<a name="crtable">`
 - **Back matter**: errata, license
 
-### Section Structure
+### Section Structure (XHTML Source)
+
+The source files use "section" terminology. The parser maps these to "scenes" in the database.
 
 ```html
 <div class="numbered">
@@ -48,15 +50,15 @@ Multi-enemy sections have multiple `<p class="combat">` elements.
 <p class="choice"><a href="#sect139">Turn to 139</a>.</p>
 ```
 
-Target section is always in the `href`: `#sect{number}`.
+Target scene is always in the `href`: `#sect{number}`.
 
 ## Pipeline Architecture
 
 ```
 Extract (BeautifulSoup)  →  Transform (normalize + classify)  →  LLM Enrichment (Haiku)  →  Load (SQLAlchemy bulk insert)
                                                                    ├─ Choice rewriting
-                                                                   ├─ Entity extraction
-                                                                   └─ Relationship inference
+                                                                   ├─ Entity/item/foe extraction (→ game_objects)
+                                                                   └─ Relationship inference (→ game_object_refs)
 ```
 
 ### Extract Phase
@@ -68,10 +70,11 @@ Uses BeautifulSoup4 to parse each XHTML file.
 - Slug from filename
 - Book number from slug prefix (e.g. `01fftd` → 1)
 - Era determined by book number (1–5: kai, 6–12: magnakai, 13–20: grand_master, 21–28: new_order, 29: new_order)
+- Start scene number: default 1
 
-**Sections**:
+**Scenes** (from XHTML "sections"):
 - Find all `<div class="numbered">` (or the single `<div>` containing numbered `<h3>` tags)
-- Section number from `<h3><a name="sect{N}">{N}</a></h3>`
+- Scene number from `<h3><a name="sect{N}">{N}</a></h3>`
 - Narrative: all `<p>` elements that are not `class="choice"` or `class="combat"`
 - Choices: all `<p class="choice">` elements
 - Combat encounters: all `<p class="combat">` elements
@@ -79,7 +82,7 @@ Uses BeautifulSoup4 to parse each XHTML file.
 **Illustrations**:
 - Extract `<img>` elements within sections
 - Copy image files to `static/images/{book_slug}/`
-- Store relative path in `sections.illustration_path`
+- Store relative path in `scenes.illustration_path`
 
 **Combat Results Table**:
 - Find `<a name="crtable">` → parent `<div>` → `<table>`
@@ -93,11 +96,16 @@ Uses BeautifulSoup4 to parse each XHTML file.
 - HTML id from `<a name="...">` inside `<h4>`
 - Description from `<p>` elements until next `<h4>`
 
+**Starting Equipment**:
+- Extract equipment list from the rules/equipment section of each book
+- Identify available weapons, backpack items, and gold options
+- Populate `book_starting_equipment` table with category and pick limits
+
 ### Transform Phase
 
 **Normalize IDs**:
-- Section references: `#sect{N}` → integer N
-- Link section IDs to their database row IDs after initial insert
+- Section references: `#sect{N}` → integer N (mapped to scene numbers)
+- Link scene IDs to their database row IDs after initial insert
 
 **Classify choice conditions**:
 
@@ -109,6 +117,11 @@ def classify_condition(choice_text):
     if "kai discipline of" in text or "discipline of" in text:
         discipline = extract_discipline_name(text)
         return ("discipline", discipline)
+
+    # OR conditions (e.g., "If you have Tracking or Huntmastery")
+    or_match = re.search(r"if you have (\w+) or (\w+)", text)
+    if or_match:
+        return ("discipline", json.dumps({"any": [or_match.group(1), or_match.group(2)]}))
 
     # Item gate
     if "if you possess" in text or "if you have a" in text:
@@ -127,7 +140,7 @@ def classify_condition(choice_text):
     return (None, None)
 ```
 
-**Detect must-eat sections** (pattern + override):
+**Detect must-eat scenes** (pattern + override):
 
 ```python
 def detect_must_eat(narrative_text):
@@ -141,9 +154,20 @@ def detect_must_eat(narrative_text):
     return any(p in text for p in patterns)
 ```
 
-Auto-detection is best-effort. False positives/negatives are corrected via the admin layer (which sets `source='manual'`).
+**Detect backpack loss scenes**:
 
-**Detect section items** (pattern + override):
+```python
+def detect_backpack_loss(narrative_text):
+    text = narrative_text.lower()
+    patterns = [
+        "you lose your backpack",
+        "your backpack is lost",
+        "backpack and all its contents",
+    ]
+    return any(p in text for p in patterns)
+```
+
+**Detect scene items** (pattern + override):
 
 ```python
 def detect_items(narrative_text):
@@ -180,12 +204,12 @@ def detect_items(narrative_text):
 
 Auto-detection is best-effort. The intent is to capture the obvious cases; the admin layer corrects errors surfaced by player bug reports.
 
-**Detect death sections**:
-- Sections where narrative ends with death language ("your adventure is over", "your life ends", "you have failed") and no outgoing choices
+**Detect death scenes**:
+- Scenes where narrative ends with death language ("your adventure is over", "your life ends", "you have failed") and no outgoing choices
 - Some deaths are combat deaths (endurance reaches 0) — these are handled at runtime, not by the parser
 
-**Detect victory sections**:
-- Final sections of each book where the adventure completes successfully
+**Detect victory scenes**:
+- Final scenes of each book where the adventure completes successfully
 
 **Validate cross-references**:
 - Every choice target `sect{N}` must exist within the same book
@@ -196,7 +220,6 @@ Auto-detection is best-effort. The intent is to capture the obvious cases; the a
 ```python
 def parse_combat(combat_element):
     text = combat_element.get_text()
-    # Pattern: "Enemy Name: COMBAT SKILL {cs}   ENDURANCE {end}"
     match = re.match(r"(.+?):\s*COMBAT SKILL\s*(\d+)\s+ENDURANCE\s*(\d+)", text)
     return {
         "enemy_name": match.group(1).strip(),
@@ -207,57 +230,59 @@ def parse_combat(combat_element):
 
 **Detect evasion rules**:
 - Look for patterns like "after three rounds of combat" + choice to evade
-- Extract round threshold and evasion target section
+- Extract round threshold, evasion target scene, and evasion damage amount
+
+**Detect evasion damage**:
+- Look for patterns like "lose N ENDURANCE points" near evasion text
+- Default to 0 if no damage mentioned
 
 **Detect Mindblast immunity**:
-- Look for "immune to Mindblast" or "Mindblast has no effect" in section narrative near combat encounters
+- Look for "immune to Mindblast" or "Mindblast has no effect" in scene narrative near combat encounters
 
 **Detect combat modifiers** (best-effort auto-detection):
 - Look for patterns near combat encounters: "immune to Mindblast", "double damage", "undead", "you cannot use [discipline]", combat skill bonuses/penalties mentioned in narrative
 - Create `combat_modifiers` rows for detected patterns
-- Common modifier types: `mindblast_immune` (also set on encounter), `double_damage`, `undead`, `cs_bonus`, `cs_penalty`, `no_weaponskill`
-- Admin corrects false positives/negatives via admin layer
 
 **Detect conditional combat**:
 - Look for patterns like "If you do not have [discipline]" or "If you do not possess [item]" near combat encounters
 - Populate `condition_type` and `condition_value` on `combat_encounters`
-- Common patterns: "If you do not have Camouflage", "Unless you possess the [item]"
 
-**Detect random outcomes**:
-- Look for "pick a number from the Random Number Table" in narrative
-- Parse outcome bands from surrounding text (e.g., "If the number is 0-4, lose 3 Endurance points. If 5-9, you find 12 Gold Crowns.")
+**Detect random outcomes** (phase-based):
+- Look for "pick a number from the Random Number Table" in narrative (not inside choice text)
+- Parse outcome bands from surrounding text
 - Create `random_outcomes` rows with effect_type, effect_value, and narrative_text
-- Distinct from choice-based random branching (which is handled via `condition_type='random'` on choices)
+
+**Detect choice-triggered random**:
+- Look for choices where the text contains "pick a number" or number range patterns
+- If a choice leads to a roll with multiple outcomes (e.g., "try to escape — roll 0-2 caught, 3-9 free"), set `target_scene_id = null` on the parent choice
+- Create `choice_random_outcomes` rows with range_min, range_max, target_scene_id, narrative_text
+
+**Detect scene-level random exits**:
+- If ALL choices in a scene have `condition_type='random'`, the scene is a random-exit scene
+- Each choice has a number range in `condition_value` and its own `target_scene_id`
 
 **Detect phase ordering**:
-- By default, the game engine computes phase sequence from section properties (item_loss → items → eat → combat → heal → choices)
-- Parser should detect non-standard ordering by examining the narrative position of items relative to combat (e.g., "you defeat the enemy and find a sword" = items AFTER combat)
-- Non-standard sections get a `phase_sequence_override` JSON array written to the `sections` table
-- This detection is best-effort; admin can correct via the admin layer
+- By default, the game engine computes phase sequence from scene properties
+- Parser should detect non-standard ordering by examining the narrative position of items relative to combat
+- Non-standard scenes get a `phase_sequence_override` JSON array written to the `scenes` table
 
 **Seed weapon categories**:
 - Extract weapon names from combat encounter text, item gains, and discipline descriptions
-- Map each weapon name to a category (Sword, Axe, Mace, etc.) using pattern matching and an initial seed list
+- Map each weapon name to a category using pattern matching and an initial seed list
 - Populate the `weapon_categories` table
-- Categories: Sword, Axe, Mace, Spear, Dagger, Bow, Quarterstaff, Warhammer, and others as encountered
 
 ### LLM Enrichment Phase (Haiku)
 
-The parser uses Claude Haiku for three enrichment tasks. All require Anthropic API credentials. Per-book import has a cost proportional to section count.
+The parser uses Claude Haiku for enrichment tasks. All require Anthropic API credentials.
 
 #### LLM Result Caching
 
 - **Decision**: Cache LLM results locally to avoid redundant API calls on re-runs.
-- **Rationale**: Saves cost during development and iteration. Choice rewriting and entity extraction are deterministic for unchanged input text.
-- **Implementation**: Hash the input text (SHA-256), store the LLM response in a local cache (SQLite file or JSON directory at `.parser_cache/`). On re-run, check cache before calling API. Cache is keyed by `(input_hash, task_type)` where task_type is `choice_rewrite`, `entity_extract`, etc.
-- Cache is local-only, not committed to the repo. Can be cleared with `--no-cache` flag.
+- **Implementation**: Hash the input text (SHA-256), store the LLM response in a local cache at `.parser_cache/`. Keyed by `(input_hash, task_type)`. Cache is local-only, not committed to the repo. Can be cleared with `--no-cache` flag.
 
 #### Choice Rewriting
 
 Choice text is rewritten to be **page-agnostic**.
-
-- **Decision**: Per-choice Haiku calls to rewrite choice text
-- **Rationale**: The application should feel like a programmed CYOA, not a book reader. "Turn to page 141" breaks immersion.
 
 ```python
 async def rewrite_choice_text(raw_text: str) -> str:
@@ -288,29 +313,29 @@ async def rewrite_choice_text(raw_text: str) -> str:
 
 Both `raw_text` (original) and `display_text` (rewritten) are stored. The API serves `display_text`.
 
-#### Entity Extraction
+#### Entity Extraction (→ game_objects + game_object_refs)
 
-Extracts world entities (characters, locations, creatures, organizations) from each section's narrative text. Entities are **global** — the LLM is given the current entity catalog and deduplicates against it, resolving name variations to existing entities where appropriate.
+Extracts game objects (characters, locations, creatures, organizations) from each scene's narrative text. Entities are **global** — the LLM is given the current game object catalog and deduplicates against it.
 
 ```python
 async def extract_entities(
     narrative_text: str,
     book_slug: str,
-    section_number: int,
-    existing_entities: list[dict],  # current catalog for dedup
+    scene_number: int,
+    existing_game_objects: list[dict],  # current catalog for dedup
 ) -> dict:
     """
-    Extract world entities from a section's narrative.
+    Extract game objects from a scene's narrative.
 
     Returns structured JSON:
     {
       "entities": [
         {
           "name": "Dorier",
-          "entity_type": "character",
+          "kind": "character",
           "description": "A Sommlending merchant encountered on the road",
           "aliases": [],
-          "existing_entity_id": null,  # or ID if matched to existing
+          "existing_game_object_id": null,
           "properties": {"title": "merchant", "race": "Sommlending"},
           "role": "quest_giver",
           "context": "Dorier offers to sell you provisions for your journey"
@@ -318,15 +343,15 @@ async def extract_entities(
       ],
       "relationships": [
         {
-          "entity_a": "Dorier",
-          "entity_b": "Sommerlund",
-          "relationship_category": "spatial",
-          "relationship_type": "originates_from"
+          "source_name": "Dorier",
+          "target_name": "Sommerlund",
+          "tags": ["spatial", "originates_from"],
+          "metadata": null
         }
       ]
     }
     """
-    entity_names = [e["name"] for e in existing_entities]
+    entity_names = [e["name"] for e in existing_game_objects]
     response = await client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=2000,
@@ -334,44 +359,52 @@ async def extract_entities(
             "role": "user",
             "content": (
                 "Extract all named characters, locations, creatures, and organizations "
-                "from this game book section narrative. For each entity, provide:\n"
+                "from this game book scene narrative. For each entity, provide:\n"
                 "- name (canonical form)\n"
-                "- entity_type: character, location, creature, or organization\n"
+                "- kind: character, location, creature, or organization\n"
                 "- description: brief summary\n"
                 "- aliases: alternate names used in text\n"
-                "- role: how the entity appears in this section "
+                "- role: how the entity appears in this scene "
                 "(combatant, quest_giver, ally, mentioned, visited, origin, obstacle, etc.)\n"
-                "- context: one sentence describing what the entity does in this section\n"
-                "- properties: type-specific metadata as JSON\n\n"
-                "Also extract relationships between entities found.\n\n"
-                "IMPORTANT: Check if any extracted entity matches an existing entity "
+                "- context: one sentence describing what the entity does in this scene\n"
+                "- properties: kind-specific metadata as JSON\n\n"
+                "Also extract relationships between entities as tagged refs with:\n"
+                "- source_name, target_name\n"
+                "- tags: array with category + type (e.g., ['spatial', 'located_in'], ['factional', 'member_of'])\n\n"
+                "IMPORTANT: Check if any extracted entity matches an existing game object "
                 f"(by name or alias). Known entities: {entity_names}\n"
                 "If a match is found, use the existing name rather than creating a duplicate.\n\n"
                 "Return valid JSON only.\n\n"
-                f"Section {section_number} from book {book_slug}:\n{narrative_text}"
+                f"Scene {scene_number} from book {book_slug}:\n{narrative_text}"
             )
         }]
     )
     return json.loads(response.content[0].text)
 ```
 
-**Deduplication strategy**: The LLM receives the current entity name list with each call. As entities accumulate across sections and books, the list grows. For very large catalogs, the list can be filtered to entities of the same type or from the same book/era to keep context manageable.
+**Deduplication strategy**: The LLM receives the current game object name list with each call. For very large catalogs, the list can be filtered to objects of the same kind or from the same book/era.
 
-**Processing order matters**: Books should be processed in order (1→29) so that entities introduced in earlier books are in the catalog when later books reference them.
+**Processing order**: Books are processed in order (1→29) so that entities from earlier books are in the catalog when later books reference them.
 
-#### Relationship Inference
+**Game object creation for items and foes**: In addition to LLM-extracted entities, the parser creates game_objects for:
+- **Foes** (kind='foe'): Each unique enemy name becomes a game_object. Properties include base_cs, base_end. The `combat_encounters` row references via `foe_game_object_id`.
+- **Items** (kind='item'): Each unique item name becomes a game_object. Properties include item_type, category. The `scene_items` row references via `game_object_id`.
+- **Scenes** (kind='scene'): Each scene gets a game_object entry. The `scenes` row references via `game_object_id`.
 
-Relationships between entities are extracted alongside entity extraction (see above). The LLM identifies relationships it observes in the narrative and categorizes them:
+#### Relationship Inference (→ game_object_refs)
 
-| Category | When to use |
-|----------|-------------|
-| `social` | Personal relationships: `trained_by`, `parent_of`, `betrayed`, `serves` |
-| `spatial` | Geographic relationships: `located_in`, `borders`, `contains`, `originates_from` |
-| `factional` | Group/political relationships: `member_of`, `allied_with`, `enemy_of`, `rules` |
-| `temporal` | Time-based relationships: `preceded_by`, `created`, `destroyed` |
-| `causal` | Cause/effect relationships: `caused`, `prevented`, `enabled`, `forged` |
+Relationships are extracted alongside entity extraction. The LLM identifies relationships and outputs them as tagged refs:
 
-Relationships are additive — the same pair of entities may have multiple relationships of different types. New relationships discovered in later sections/books are added without removing earlier ones.
+| Tag Category | When to use |
+|-------------|-------------|
+| `appearance` | Entity appears in a scene: `["appearance", "{role}"]` |
+| `social` | Personal relationships: `["social", "trained_by"]`, `["social", "parent_of"]` |
+| `spatial` | Geographic relationships: `["spatial", "located_in"]`, `["spatial", "borders"]` |
+| `factional` | Group/political: `["factional", "member_of"]`, `["factional", "enemy_of"]` |
+| `temporal` | Time-based: `["temporal", "preceded_by"]`, `["temporal", "created"]` |
+| `causal` | Cause/effect: `["causal", "caused"]`, `["causal", "prevented"]` |
+
+Relationships are additive — new refs discovered in later scenes/books are added without removing earlier ones.
 
 ### Load Phase
 
@@ -379,21 +412,25 @@ Bulk insert order (respecting foreign keys):
 
 1. `books`
 2. `disciplines` (FK → books)
-3. `sections` (FK → books) — includes `phase_sequence_override` for non-standard sections
-4. `choices` (FK → sections) — target_section_id resolved in second pass
-5. `combat_encounters` (FK → sections)
-6. `combat_modifiers` (FK → combat_encounters)
-7. `combat_results` (FK → books)
-8. `section_items` (FK → sections) — includes `phase_ordinal` for positioning
-9. `random_outcomes` (FK → sections) — outcome bands for random phases
-10. `weapon_categories` (standalone) — seeded from extracted weapon names
-11. `world_entities` (FK → books, sections for first_appearance)
-12. `world_entity_appearances` (FK → world_entities, sections)
-13. `world_entity_relationships` (FK → world_entities)
+3. `game_objects` with kind='scene' (one per scene, for taxonomy)
+4. `scenes` (FK → books, FK → game_objects) — includes `phase_sequence_override`, `loses_backpack`
+5. `choices` (FK → scenes) — target_scene_id resolved in second pass
+6. `choice_random_outcomes` (FK → choices, FK → scenes) — for choice-triggered random
+8. `game_objects` with kind='foe' (from combat encounter extraction)
+9. `combat_encounters` (FK → scenes, FK → game_objects for foe)
+10. `combat_modifiers` (FK → combat_encounters)
+11. `combat_results` (FK → books)
+12. `game_objects` with kind='item' (from item extraction)
+13. `scene_items` (FK → scenes, FK → game_objects for items)
+14. `random_outcomes` (FK → scenes)
+15. `weapon_categories` (standalone)
+16. `game_objects` with kind='character', 'location', 'creature', 'organization' (from LLM extraction)
+17. `game_object_refs` (tagged refs for all appearances and relationships)
+18. `book_starting_equipment` (FK → books, FK → game_objects)
 
-**Two-pass choice loading**:
-1. First pass: insert all sections, get their IDs
-2. Second pass: resolve `target_section_number` → `target_section_id`
+**Two-pass scene/choice loading**:
+1. First pass: insert all scenes, get their IDs
+2. Second pass: resolve `target_scene_number` → `target_scene_id`
 
 **Source column handling for re-runs**:
 
@@ -408,7 +445,7 @@ def upsert_with_source(table, key_columns, data):
         insert(data, source='auto')
 ```
 
-Tables with `source` column: `sections`, `choices`, `combat_encounters`, `section_items`, `random_outcomes`, `world_entities`, `world_entity_appearances`, `world_entity_relationships`.
+Tables with `source` column: `scenes`, `choices`, `combat_encounters`, `scene_items`, `random_outcomes`, `game_objects`, `game_object_refs`.
 
 ## CLI Interface
 
@@ -444,10 +481,12 @@ uv run python scripts/seed_db.py --no-cache
 The script:
 1. Unzips the XHTML source to a temp directory
 2. Filters to `en/xhtml-simple/lw/*.htm` files
-3. **Processes books in order** (1→29) so entity catalog builds up for deduplication
+3. **Processes books in order** (1→29) so game object catalog builds up for deduplication
 4. Runs extract → transform → LLM enrichment → load for each book
-5. Extracts illustrations to `static/images/{book_slug}/`
-6. Reports summary (sections parsed, choices found, combat encounters, items detected, entities extracted, relationships found, rewrites performed, warnings)
+5. Creates game_objects for scenes, foes, and items alongside content tables
+6. Extracts illustrations to `static/images/{book_slug}/`
+7. Extracts starting equipment lists to `book_starting_equipment`
+8. Reports summary (scenes parsed, choices found, combat encounters, items detected, game objects created, refs created, rewrites performed, warnings)
 
 ## Known Edge Cases
 
@@ -469,12 +508,18 @@ Added later to the Project Aon archive. Follows the standard format but may have
 ### Inconsistent HTML
 Some books use slightly different class names or structures. The parser should log warnings for unrecognized patterns rather than failing.
 
+### OR conditions in choices
+Some choices gate on multiple disciplines/items ("If you have Tracking or Huntmastery"). The parser detects these and outputs JSON `condition_value` (e.g., `{"any": ["Tracking", "Huntmastery"]}`).
+
+### Backpack loss scenes
+Some scenes cause loss of all backpack contents. Parser detects these and sets `loses_backpack = true` on the scene.
+
 ## Content Refinement Workflow
 
 The parser is the starting point, not the final word. The intended workflow:
 
 ```
-1. Parser seeds database with auto-detected content
+1. Parser seeds database with auto-detected content (scenes, game objects, refs)
 2. Players play the game
 3. Players file bug reports ("meal wasn't deducted", "wrong item gained", etc.)
 4. Admins review reports in the admin queue

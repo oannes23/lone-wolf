@@ -16,19 +16,24 @@ These tables are populated by the parser and are read-only at runtime (except vi
 | `title` | `String(200)` | Full title |
 | `era` | `String(20)` | `kai`, `magnakai`, `grand_master`, `new_order` |
 | `series` | `String(20)` | `lone_wolf` (future: `grey_star`, `freeway_warrior`) |
+| `start_scene_number` | `Integer` | Starting scene number for this book. Default 1. |
 
-### `sections`
+### `scenes`
+
+Gameplay-specific data for each numbered passage. Each scene also has a corresponding `game_objects` entry (kind='scene') for taxonomy purposes.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | Auto-increment |
+| `game_object_id` | `Integer` FK → `game_objects.id` | 1:1 link to the game_objects taxonomy entry for this scene |
 | `book_id` | `Integer` FK → `books.id` | |
-| `number` | `Integer` | Section number within book |
-| `html_id` | `String(20)` | Anchor name, e.g. `sect1` |
+| `number` | `Integer` | Scene number within book |
+| `html_id` | `String(20)` | Anchor name from source, e.g. `sect1` |
 | `narrative` | `Text` | Full narrative HTML (styled for display) |
-| `is_death` | `Boolean` | Section results in character death |
-| `is_victory` | `Boolean` | Section completes the book |
-| `must_eat` | `Boolean` | Section requires a meal check |
+| `is_death` | `Boolean` | Scene results in character death |
+| `is_victory` | `Boolean` | Scene completes the book |
+| `must_eat` | `Boolean` | Scene requires a meal check |
+| `loses_backpack` | `Boolean` | Scene causes loss of all backpack items and meals. Default false. |
 | `illustration_path` | `String(255)` NULLABLE | Relative path to illustration image file |
 | `phase_sequence_override` | `Text` NULLABLE | JSON array overriding the default phase sequence (see game-engine.md). Null = use computed default. |
 | `source` | `String(10)` | `auto` or `manual` — controls parser re-run behavior |
@@ -40,30 +45,51 @@ These tables are populated by the parser and are read-only at runtime (except vi
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `section_id` | `Integer` FK → `sections.id` | Source section |
-| `target_section_id` | `Integer` FK → `sections.id` NULLABLE | Destination (null if unresolvable) |
-| `target_section_number` | `Integer` | Raw target number from XHTML |
+| `scene_id` | `Integer` FK → `scenes.id` | Source scene |
+| `target_scene_id` | `Integer` FK → `scenes.id` NULLABLE | Destination (null if unresolvable) |
+| `target_scene_number` | `Integer` | Raw target number from XHTML |
 | `raw_text` | `Text` | Original choice text from XHTML |
 | `display_text` | `Text` | Rewritten text (Haiku-generated, page-agnostic) |
 | `condition_type` | `String(30)` NULLABLE | `discipline`, `item`, `gold`, `random`, `none` |
-| `condition_value` | `String(100)` NULLABLE | e.g. `Sixth Sense`, `Vordak Gem`, `10` |
-| `ordinal` | `Integer` | Display order within section |
+| `condition_value` | `Text` NULLABLE | Simple string (e.g. `Sixth Sense`, `10`) or JSON for compound conditions (e.g. `{"any": ["Tracking", "Huntmastery"]}`) |
+| `ordinal` | `Integer` | Display order within scene |
 | `source` | `String(10)` | `auto` or `manual` |
+
+### `choice_random_outcomes`
+
+Outcome bands for choice-triggered random rolls. When a choice leads to a roll (e.g., "try to run away" → roll → different scenes), the parent choice has `target_scene_id = null` and outcome bands are stored here. The API returns these bands when the player selects the choice, then the player calls `/roll` to resolve.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `Integer` PK | |
+| `choice_id` | `Integer` FK → `choices.id` | Parent choice (has `target_scene_id = null`) |
+| `range_min` | `Integer` | Lower bound of number range (0–9) |
+| `range_max` | `Integer` | Upper bound of number range (0–9) |
+| `target_scene_id` | `Integer` FK → `scenes.id` | Destination scene for this outcome |
+| `target_scene_number` | `Integer` | Raw target number from XHTML |
+| `narrative_text` | `Text` NULLABLE | Flavor text for this outcome |
+| `source` | `String(10)` | `auto` or `manual` |
+
+**Unique constraint**: `(choice_id, range_min, range_max)`
+
+Distinct from `random_outcomes` (phase-based random effects) and from choices with `condition_type='random'` (scene-level random exits where ALL choices are random-gated). This table handles the third random pattern: player selects a specific choice, then rolls.
 
 ### `combat_encounters`
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `section_id` | `Integer` FK → `sections.id` | |
-| `enemy_name` | `String(100)` | e.g. `Kraan`, `Giak 1` |
+| `scene_id` | `Integer` FK → `scenes.id` | |
+| `foe_game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to foe game_object |
+| `enemy_name` | `String(100)` | e.g. `Kraan`, `Giak 1` (denormalized from game_object if linked) |
 | `enemy_cs` | `Integer` | Enemy Combat Skill |
 | `enemy_end` | `Integer` | Enemy Endurance |
-| `ordinal` | `Integer` | Order within section (for multi-enemy) |
+| `ordinal` | `Integer` | Order within scene (for multi-enemy) |
 | `mindblast_immune` | `Boolean` | Enemy immune to Mindblast |
 | `evasion_after_rounds` | `Integer` NULLABLE | Can evade after N rounds |
-| `evasion_target` | `Integer` NULLABLE | Section number to turn to on evasion |
-| `condition_type` | `String(30)` NULLABLE | `discipline`, `item`, `none`. If set, combat only triggers when condition is NOT met (e.g., combat if you lack Camouflage). Null = always fight. |
+| `evasion_target` | `Integer` NULLABLE | Scene number to turn to on evasion |
+| `evasion_damage` | `Integer` | Damage dealt to hero on evasion. Default 0. |
+| `condition_type` | `String(30)` NULLABLE | `discipline`, `item`, `none`. If set, combat only triggers when condition is NOT met. Null = always fight. |
 | `condition_value` | `String(100)` NULLABLE | e.g. `Camouflage`, `Vordak Gem`. The value that, if present, lets you SKIP this combat. |
 | `source` | `String(10)` | `auto` or `manual` |
 
@@ -93,21 +119,22 @@ The CRT has 13 combat ratio brackets × 10 random numbers = 130 rows per book. `
 | `name` | `String(50)` | e.g. `Camouflage`, `Weaponmastery` |
 | `html_id` | `String(30)` | Anchor name, e.g. `camflage`, `wpnmstry` |
 | `description` | `Text` | Rule text |
-| `mechanical_effect` | `String(200)` NULLABLE | Machine-readable effect, e.g. `+2 CS`, `+1 END/section` |
+| `mechanical_effect` | `String(200)` NULLABLE | Machine-readable effect, e.g. `+2 CS`, `+1 END/scene` |
 
-### `section_items`
+### `scene_items`
 
-Items that can be picked up or lost in a section. Items with `action='gain'` require explicit player pickup (accept or decline) before the character can make choices.
+Items that can be picked up or lost in a scene. Items with `action='gain'` require explicit player pickup (accept or decline) before the character can make choices.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `section_id` | `Integer` FK → `sections.id` | |
-| `item_name` | `String(100)` | |
+| `scene_id` | `Integer` FK → `scenes.id` | |
+| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object (taxonomy) |
+| `item_name` | `String(100)` | Display name |
 | `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `gold`, `meal` |
 | `quantity` | `Integer` | Default 1; for gold, the amount |
 | `action` | `String(10)` | `gain` or `lose` |
-| `phase_ordinal` | `Integer` | Position in the section's phase sequence (for items that appear before or after combat) |
+| `phase_ordinal` | `Integer` | Position in the scene's phase sequence |
 | `source` | `String(10)` | `auto` or `manual` |
 
 ### `weapon_categories`
@@ -124,21 +151,21 @@ Weaponskill/Weaponmastery bonuses apply when the equipped weapon's category matc
 
 ### `random_outcomes`
 
-Outcome bands for phase-based random rolls. Each row represents one outcome for a number range within a section's random phase. Distinct from choice-based random branching (which uses `condition_type='random'` on choices).
+Outcome bands for phase-based random rolls. Each row represents one outcome for a number range within a scene's random phase. Distinct from choice-based random branching (which uses `condition_type='random'` on choices).
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `section_id` | `Integer` FK → `sections.id` | |
+| `scene_id` | `Integer` FK → `scenes.id` | |
 | `range_min` | `Integer` | Lower bound of number range (0–9) |
 | `range_max` | `Integer` | Upper bound of number range (0–9) |
-| `effect_type` | `String(30)` | `gold_change`, `endurance_change`, `item_gain`, `item_loss`, `meal_change`, `section_redirect` |
-| `effect_value` | `String(200)` | JSON: e.g. `{"amount": 5}`, `{"item_name": "Sword", "item_type": "weapon"}`, `{"section_number": 200}` |
+| `effect_type` | `String(30)` | `gold_change`, `endurance_change`, `item_gain`, `item_loss`, `meal_change`, `scene_redirect` |
+| `effect_value` | `String(200)` | JSON: e.g. `{"amount": 5}`, `{"item_name": "Sword", "item_type": "weapon"}`, `{"scene_number": 200}` |
 | `narrative_text` | `Text` NULLABLE | Flavor text describing this outcome to the player |
-| `ordinal` | `Integer` | Display order within section |
+| `ordinal` | `Integer` | Display order within scene |
 | `source` | `String(10)` | `auto` or `manual` |
 
-**Unique constraint**: `(section_id, range_min, range_max)`
+**Unique constraint**: `(scene_id, range_min, range_max)`
 
 ### `combat_modifiers`
 
@@ -152,71 +179,57 @@ Special combat rules that apply to specific encounters.
 | `modifier_value` | `String(100)` NULLABLE | Numeric or descriptive |
 | `condition` | `String(200)` NULLABLE | When the modifier applies |
 
-## World Taxonomy Tables
+## Game Object Taxonomy
 
-A knowledge graph of the Lone Wolf universe. Populated by LLM extraction during import, refined via admin. Tracks characters, locations, creatures, and organizations across all books and sections — including both direct appearances and narrative references.
+A Kind-based knowledge graph of the Lone Wolf universe. All world entities, items, foes, and scenes are unified as game objects with typed refs. Populated by LLM extraction during import, refined via admin. Follows the ops.md GameObject pattern.
 
-### `world_entities`
+### `game_objects`
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
+| `kind` | `String(30)` | `character`, `location`, `creature`, `organization`, `item`, `foe`, `scene` |
 | `name` | `String(200)` | Canonical name |
-| `entity_type` | `String(30)` | `character`, `location`, `creature`, `organization` |
-| `description` | `Text` NULLABLE | LLM-generated summary, refined by admin |
+| `description` | `Text` NULLABLE | LLM-generated or admin-written summary |
 | `aliases` | `Text` NULLABLE | JSON array of alternate names (e.g. `["Lone Wolf", "Silent Wolf", "Grand Master"]`) |
+| `properties` | `Text` NULLABLE | JSON blob for kind-specific data (see below) |
 | `first_book_id` | `Integer` FK → `books.id` NULLABLE | Book of first appearance |
-| `first_section_id` | `Integer` FK → `sections.id` NULLABLE | Section of first appearance |
-| `properties` | `Text` NULLABLE | JSON blob for type-specific data (see below) |
 | `source` | `String(10)` | `auto` or `manual` |
 
-**Unique constraint**: `(name, entity_type)`
+**Unique constraint**: `(name, kind)`
 
-**Properties blob examples by type**:
-- Character: `{"title": "Grand Master", "race": "Sommlending", "allegiance": "Kai"}`
-- Location: `{"region": "Sommerlund", "type": "city"}`
-- Creature: `{"species": "Kraan", "allegiance": "Darklords"}`
-- Organization: `{"type": "order", "base": "Kai Monastery"}`
+**Properties blob examples by kind**:
+- character: `{"title": "Grand Master", "race": "Sommlending", "allegiance": "Kai"}`
+- location: `{"region": "Sommerlund", "type": "city"}`
+- creature: `{"species": "Kraan", "allegiance": "Darklords"}`
+- organization: `{"type": "order", "base": "Kai Monastery"}`
+- item: `{"item_type": "weapon", "category": "Sword", "is_special": false}`
+- foe: `{"base_cs": 16, "base_end": 24, "mindblast_immune": false}`
+- scene: `{"book_number": 1, "scene_number": 1}` (minimal — gameplay data lives in scenes table)
 
-### `world_entity_appearances`
+### `game_object_refs`
 
-Links entities to every section they appear in, including narrative references.
+Minimal tagged refs following the ops.md pattern. Replaces separate appearances and relationship tables. A single unified table for all inter-object links.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `entity_id` | `Integer` FK → `world_entities.id` | |
-| `section_id` | `Integer` FK → `sections.id` | |
-| `role` | `String(50)` | `combatant`, `quest_giver`, `ally`, `mentioned`, `visited`, `origin`, `obstacle`, etc. |
-| `context` | `Text` NULLABLE | LLM-generated snippet describing the entity's role in this section |
+| `source_id` | `Integer` FK → `game_objects.id` | |
+| `target_id` | `Integer` FK → `game_objects.id` | |
+| `tags` | `Text` | JSON array encoding category + type/role (see examples below) |
+| `metadata` | `Text` NULLABLE | JSON blob for context, notes, quantities, etc. |
 | `source` | `String(10)` | `auto` or `manual` |
 
-**Unique constraint**: `(entity_id, section_id)`
+Tags encode both the relationship category and the specific type/role. Examples:
+- Entity appears in scene: `["appearance", "combatant"]`, metadata: `{"context": "Kraan attacks from above"}`
+- Spatial relationship: `["spatial", "located_in"]`, metadata: `{"notes": "Capital city of Sommerlund"}`
+- Social relationship: `["social", "trained_by"]`
+- Factional: `["factional", "member_of"]`
+- Item wielded by character: `["factional", "wields"]`
 
-### `world_entity_relationships`
+**Tag categories**: `appearance`, `social`, `spatial`, `factional`, `temporal`, `causal`
 
-Typed, directed relationships between entities. Builds a knowledge graph.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | `Integer` PK | |
-| `entity_a_id` | `Integer` FK → `world_entities.id` | Subject entity |
-| `entity_b_id` | `Integer` FK → `world_entities.id` | Object entity |
-| `relationship_category` | `String(20)` | `social`, `spatial`, `factional`, `temporal`, `causal` |
-| `relationship_type` | `String(50)` | Freeform within category (e.g. `rules`, `trained_by`, `located_in`, `allied_with`) |
-| `source` | `String(10)` | `auto` or `manual` |
-
-**Unique constraint**: `(entity_a_id, entity_b_id, relationship_type)`
-
-**Relationship categories and example types**:
-
-| Category | Example Types |
-|----------|---------------|
-| `social` | `trained_by`, `betrayed`, `parent_of`, `serves` |
-| `spatial` | `located_in`, `borders`, `contains`, `originates_from` |
-| `factional` | `member_of`, `allied_with`, `enemy_of`, `rules` |
-| `temporal` | `preceded_by`, `created`, `destroyed` |
-| `causal` | `caused`, `prevented`, `enabled`, `forged` |
+**Uniqueness**: Application-level enforcement on `(source_id, target_id, tags)`.
 
 ### `book_transition_rules`
 
@@ -232,9 +245,25 @@ Defines carry-over rules between books. Populated by parser or admin.
 | `special_items_carry` | `Boolean` | Whether special items carry over |
 | `gold_carries` | `Boolean` | Whether gold carries over |
 | `new_disciplines_count` | `Integer` | How many new disciplines the player picks |
-| `base_cs_override` | `Integer` NULLABLE | New base CS if era changes (e.g., Grand Master = 15 + random) |
+| `base_cs_override` | `Integer` NULLABLE | New base CS if era changes |
 | `base_end_override` | `Integer` NULLABLE | New base END if era changes |
 | `notes` | `Text` NULLABLE | Free text for special rules |
+
+### `book_starting_equipment`
+
+Available equipment for character creation per book. Drives the equipment wizard step.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `Integer` PK | |
+| `book_id` | `Integer` FK → `books.id` | |
+| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object |
+| `item_name` | `String(100)` | Display name |
+| `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `gold`, `meal` |
+| `category` | `String(30)` | Grouping for pick limits (e.g., `weapons`, `backpack`, `special`) |
+| `max_picks_in_category` | `Integer` NULLABLE | How many items can be picked from this category |
+| `is_default` | `Boolean` | Whether this item is given automatically (not a choice) |
+| `source` | `String(10)` | `auto` or `manual` |
 
 ## Player Tables
 
@@ -257,22 +286,24 @@ Defines carry-over rules between books. Populated by parser or admin.
 | `user_id` | `Integer` FK → `users.id` | |
 | `name` | `String(100)` | Player-chosen name |
 | `book_id` | `Integer` FK → `books.id` | Current book |
-| `current_section_id` | `Integer` FK → `sections.id` NULLABLE | Current position |
-| `section_phase` | `String(20)` NULLABLE | Current phase within section: `items`, `eat`, `combat`, `heal`, `choices`. Null if no active phase processing. |
-| `section_phase_index` | `Integer` NULLABLE | Index into the section's phase sequence (0-based). Tracks position in arbitrary phase ordering. |
-| `active_combat_encounter_id` | `Integer` FK → `combat_encounters.id` NULLABLE | Set when combat begins, cleared on win/loss/evasion. Allows combat resume on reconnect. |
-| `wizard_step` | `String(20)` NULLABLE | Book advance wizard step: `discipline`, `inventory`, `confirm`. Null when not in wizard. |
+| `current_scene_id` | `Integer` FK → `scenes.id` NULLABLE | Current position |
+| `scene_phase` | `String(20)` NULLABLE | Current phase within scene: `items`, `eat`, `combat`, `heal`, `choices`. Null if no active phase processing. |
+| `scene_phase_index` | `Integer` NULLABLE | Index into the scene's phase sequence (0-based). |
+| `active_combat_encounter_id` | `Integer` FK → `combat_encounters.id` NULLABLE | Set when combat begins, cleared on win/loss/evasion. |
+| `active_wizard_id` | `Integer` FK → `character_wizard_progress.id` NULLABLE | Set when character is in any wizard (creation, book advance). Null when not in a wizard. |
 | `combat_skill_base` | `Integer` | Initial CS (10 + random 0–9) |
 | `endurance_base` | `Integer` | Initial END (20 + random 0–9) |
+| `endurance_max` | `Integer` | Maximum END (base + permanent bonuses like lore-circles). Healing caps at this value. |
 | `endurance_current` | `Integer` | Current END |
-| `gold` | `Integer` | 0–50 |
-| `meals` | `Integer` | Meal count |
+| `gold` | `Integer` | 0–50. On pickup, partial acceptance up to cap (auto-applied). |
+| `meals` | `Integer` | Meal count. Sole source of truth for meals — meals are NOT tracked as character_items. Do not count against backpack limit. |
 | `is_alive` | `Boolean` | |
-| `is_deleted` | `Boolean` | Soft delete flag. Deleted characters are hidden from player lists but preserved for analytics. Admin can restore. |
+| `is_deleted` | `Boolean` | Soft delete flag. |
 | `deleted_at` | `DateTime` NULLABLE | When the character was soft-deleted |
 | `death_count` | `Integer` | Number of times this character has died and restarted |
 | `current_run` | `Integer` | Current run number (starts at 1) |
-| `rule_overrides` | `Text` NULLABLE | JSON blob for per-character rule config (e.g., `{"discipline_stacking": "stack"}`). Null = use defaults. See game-engine.md. |
+| `version` | `Integer` | Optimistic locking counter. Incremented on every state mutation. Default 1. |
+| `rule_overrides` | `Text` NULLABLE | JSON blob for per-character rule config. Null = use defaults. See game-engine.md. |
 | `created_at` | `DateTime` | |
 | `updated_at` | `DateTime` | |
 
@@ -291,9 +322,12 @@ Defines carry-over rules between books. Populated by parser or admin.
 |--------|------|-------|
 | `id` | `Integer` PK | |
 | `character_id` | `Integer` FK → `characters.id` | |
+| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object (taxonomy). Parser links when possible. |
 | `item_name` | `String(100)` | |
-| `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `meal` |
+| `item_type` | `String(20)` | `weapon`, `backpack`, `special` |
 | `is_equipped` | `Boolean` | For weapons |
+
+Note: Meals are tracked as the `meals` integer on `characters`, NOT as `character_items` rows.
 
 ### `character_book_starts`
 
@@ -306,6 +340,7 @@ Snapshot of character state at the beginning of each book, used for death-restar
 | `book_id` | `Integer` FK → `books.id` | |
 | `combat_skill_base` | `Integer` | |
 | `endurance_base` | `Integer` | |
+| `endurance_max` | `Integer` | Snapshot of endurance_max at book start |
 | `endurance_current` | `Integer` | |
 | `gold` | `Integer` | |
 | `meals` | `Integer` | |
@@ -324,10 +359,10 @@ Every choice the character makes, for full history and replay. Tagged by run.
 | `id` | `Integer` PK | |
 | `character_id` | `Integer` FK → `characters.id` | |
 | `run_number` | `Integer` | Which attempt at this book (1-indexed) |
-| `from_section_id` | `Integer` FK → `sections.id` | |
-| `to_section_id` | `Integer` FK → `sections.id` | |
+| `from_scene_id` | `Integer` FK → `scenes.id` | |
+| `to_scene_id` | `Integer` FK → `scenes.id` | |
 | `choice_id` | `Integer` FK → `choices.id` NULLABLE | Null for combat/random outcomes |
-| `action_type` | `String(20)` | `choice`, `combat_win`, `combat_evasion`, `random`, `death`, `restart` |
+| `action_type` | `String(20)` | `choice`, `combat_win`, `combat_evasion`, `random`, `death`, `restart`, `replay` |
 | `details` | `Text` NULLABLE | JSON blob for combat rounds, items gained/lost, etc. |
 | `created_at` | `DateTime` | |
 
@@ -352,26 +387,60 @@ Full round-by-round combat history. Current combat state derived from latest rou
 
 ### `character_events`
 
-Generic state-change audit trail. One row per phase step completion. Tracks every meaningful state change a character undergoes, tied to the section and run that caused it.
+Generic state-change audit trail. One row per phase step completion. Tracks every meaningful state change a character undergoes, tied to the scene and run that caused it.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
 | `character_id` | `Integer` FK → `characters.id` | |
-| `section_id` | `Integer` FK → `sections.id` | Section where the event occurred |
+| `scene_id` | `Integer` FK → `scenes.id` | Scene where the event occurred |
 | `run_number` | `Integer` | Which attempt at this book |
-| `event_type` | `String(30)` | `item_pickup`, `item_decline`, `item_loss`, `meal_consumed`, `meal_penalty`, `gold_change`, `endurance_change`, `healing`, `combat_start`, `combat_end`, `evasion`, `death`, `restart`, `discipline_gained`, `book_advance`, `random_roll` |
-| `phase` | `String(20)` NULLABLE | Which section phase produced this event |
-| `details` | `Text` NULLABLE | JSON blob with event-specific data (e.g., `{"item_name": "Sword", "item_type": "weapon"}` or `{"end_change": -3, "reason": "no_meal"}`) |
+| `event_type` | `String(30)` | `item_pickup`, `item_decline`, `item_loss`, `item_loss_skip`, `meal_consumed`, `meal_penalty`, `gold_change`, `endurance_change`, `healing`, `combat_start`, `combat_end`, `combat_skipped`, `evasion`, `death`, `restart`, `replay`, `discipline_gained`, `book_advance`, `random_roll`, `backpack_loss` |
+| `phase` | `String(20)` NULLABLE | Which scene phase produced this event |
+| `details` | `Text` NULLABLE | JSON blob with event-specific data |
 | `created_at` | `DateTime` | |
 
 Coexists with `decision_log` (navigation/choice history) and `combat_rounds` (round-by-round combat detail). The events table captures state mutations; the other tables capture gameplay decisions and combat mechanics.
+
+## Wizard Tables
+
+Data-driven wizard system used by both character creation and book advance.
+
+### `wizard_templates`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `Integer` PK | |
+| `name` | `String(50)` UNIQUE | e.g., `character_creation`, `book_advance` |
+| `description` | `Text` NULLABLE | |
+
+### `wizard_template_steps`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `Integer` PK | |
+| `template_id` | `Integer` FK → `wizard_templates.id` | |
+| `step_type` | `String(30)` | `stat_roll`, `pick_disciplines`, `pick_equipment`, `pick_weapon_skill`, `inventory_adjust`, `confirm` |
+| `config` | `Text` NULLABLE | JSON config for the step (e.g., `{"count": 5}` for discipline count, `{"categories": ["weapons", "backpack"]}` for equipment) |
+| `ordinal` | `Integer` | Order within the wizard |
+
+### `character_wizard_progress`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `Integer` PK | |
+| `character_id` | `Integer` FK → `characters.id` | |
+| `wizard_template_id` | `Integer` FK → `wizard_templates.id` | |
+| `current_step_index` | `Integer` | 0-based index into wizard_template_steps |
+| `state` | `Text` NULLABLE | JSON blob for accumulated wizard state (selected disciplines, rolled stats, equipment choices, etc.) |
+| `started_at` | `DateTime` | |
+| `completed_at` | `DateTime` NULLABLE | |
 
 ## Admin Tables
 
 ### `admin_users`
 
-Separate from player accounts.
+Separate from player accounts. First admin created via CLI command (`scripts/create_admin.py`).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -389,7 +458,7 @@ Player-submitted bug reports.
 | `id` | `Integer` PK | |
 | `user_id` | `Integer` FK → `users.id` | Reporter |
 | `character_id` | `Integer` FK → `characters.id` NULLABLE | Character at time of report |
-| `section_id` | `Integer` FK → `sections.id` NULLABLE | Section where issue occurred |
+| `scene_id` | `Integer` FK → `scenes.id` NULLABLE | Scene where issue occurred |
 | `tags` | `Text` | JSON array of category tags |
 | `free_text` | `Text` NULLABLE | Optional description |
 | `status` | `String(20)` | `open`, `triaging`, `resolved`, `wont_fix` |
@@ -403,19 +472,26 @@ Player-submitted bug reports.
 ## Relationships
 
 ```
-books 1──∞ sections 1──∞ choices
-                    1──∞ combat_encounters 1──∞ combat_modifiers
-                    1──∞ section_items
-                    1──∞ random_outcomes
-                    1──∞ world_entity_appearances
+books 1──∞ scenes 1──∞ choices 1──∞ choice_random_outcomes
+                  1──∞ combat_encounters 1──∞ combat_modifiers
+                  1──∞ scene_items
+                  1──∞ random_outcomes
 books 1──∞ combat_results
 books 1──∞ disciplines
 books 1──∞ book_transition_rules (as from_book or to_book)
+books 1──∞ book_starting_equipment
 
-world_entities 1──∞ world_entity_appearances
-world_entities ∞──∞ world_entities (via world_entity_relationships)
+scenes ∞──1 game_objects (game_object_id, 1:1)
+combat_encounters ∞──1 game_objects (foe_game_object_id)
+scene_items ∞──1 game_objects (game_object_id, nullable)
+
+game_objects 1──∞ game_object_refs (as source)
+game_objects 1──∞ game_object_refs (as target)
 
 weapon_categories (standalone lookup)
+
+wizard_templates 1──∞ wizard_template_steps
+wizard_templates 1──∞ character_wizard_progress
 
 users 1──∞ characters 1──∞ character_disciplines
                       1──∞ character_items
@@ -423,34 +499,40 @@ users 1──∞ characters 1──∞ character_disciplines
                       1──∞ decision_log
                       1──∞ combat_rounds
                       1──∞ character_events
+                      1──∞ character_wizard_progress
 characters ∞──1 combat_encounters (active_combat_encounter_id)
+characters ∞──1 character_wizard_progress (active_wizard_id)
+character_items ∞──1 game_objects (game_object_id, nullable)
 users 1──∞ reports
 ```
 
 ## Indexes
 
-- `sections(book_id, number)` — unique, fast lookup by book + section number
-- `choices(section_id)` — all choices for a section
-- `combat_encounters(section_id)` — combats in a section
+- `scenes(book_id, number)` — unique, fast lookup by book + scene number
+- `choices(scene_id)` — all choices for a scene
+- `combat_encounters(scene_id)` — combats in a scene
 - `combat_results(book_id, random_number, combat_ratio_min)` — CRT lookup
 - `characters(user_id)` — list user's characters
+- `characters(user_id, is_deleted)` — list user's active characters
 - `decision_log(character_id, run_number, created_at)` — character history per run
 - `combat_rounds(character_id, combat_encounter_id, round_number)` — combat state lookup
-- `character_events(character_id, section_id, created_at)` — events per section visit
+- `character_events(character_id, scene_id, created_at)` — events per scene visit
 - `character_events(character_id, event_type)` — filter by event type
 - `reports(status, created_at)` — admin queue ordering
-- `world_entities(entity_type)` — filter by category
-- `world_entity_appearances(entity_id)` — all appearances of an entity
-- `world_entity_appearances(section_id)` — all entities in a section
-- `world_entity_relationships(entity_a_id)` — outgoing relationships
-- `world_entity_relationships(entity_b_id)` — incoming relationships
+- `game_objects(kind)` — filter by kind
+- `game_objects(kind, name)` — lookup by kind + name
+- `game_object_refs(source_id)` — outgoing refs
+- `game_object_refs(target_id)` — incoming refs
 - `weapon_categories(category)` — lookup weapons by category
-- `random_outcomes(section_id)` — outcomes for a section's random phase
-- `characters(user_id, is_deleted)` — list user's active characters (filter soft-deleted)
+- `random_outcomes(scene_id)` — outcomes for a scene's random phase
+- `choice_random_outcomes(choice_id)` — outcome bands for choice-triggered random
+- `book_starting_equipment(book_id)` — equipment list per book
 
 ## Migration Strategy
 
 - Alembic with auto-generation from SQLAlchemy models
 - Content tables seeded by the parser (`scripts/seed_db.py`)
 - Player tables created empty on first migration
-- Illustrations stored on filesystem at `static/images/{book_slug}/`; paths stored in `sections.illustration_path`
+- Wizard templates seeded by a fixture script or parser
+- First admin created via CLI command (`scripts/create_admin.py`)
+- Illustrations stored on filesystem at `static/images/{book_slug}/`; paths stored in `scenes.illustration_path`
