@@ -411,22 +411,22 @@ Relationships are additive — new refs discovered in later scenes/books are add
 Bulk insert order (respecting foreign keys):
 
 1. `books`
-2. `disciplines` (FK → books)
+2. `disciplines` (era-scoped, no book FK)
 3. `game_objects` with kind='scene' (one per scene, for taxonomy)
 4. `scenes` (FK → books, FK → game_objects) — includes `phase_sequence_override`, `loses_backpack`
 5. `choices` (FK → scenes) — target_scene_id resolved in second pass
 6. `choice_random_outcomes` (FK → choices, FK → scenes) — for choice-triggered random
-8. `game_objects` with kind='foe' (from combat encounter extraction)
-9. `combat_encounters` (FK → scenes, FK → game_objects for foe)
-10. `combat_modifiers` (FK → combat_encounters)
-11. `combat_results` (FK → books)
-12. `game_objects` with kind='item' (from item extraction)
-13. `scene_items` (FK → scenes, FK → game_objects for items)
-14. `random_outcomes` (FK → scenes)
-15. `weapon_categories` (standalone)
-16. `game_objects` with kind='character', 'location', 'creature', 'organization' (from LLM extraction)
-17. `game_object_refs` (tagged refs for all appearances and relationships)
-18. `book_starting_equipment` (FK → books, FK → game_objects)
+7. `game_objects` with kind='foe' (from combat encounter extraction)
+8. `combat_encounters` (FK → scenes, FK → game_objects for foe)
+9. `combat_modifiers` (FK → combat_encounters)
+10. `combat_results` (era-scoped)
+11. `game_objects` with kind='item' (from item extraction)
+12. `scene_items` (FK → scenes, FK → game_objects for items)
+13. `random_outcomes` (FK → scenes)
+14. `weapon_categories` (standalone)
+15. `game_objects` with kind='character', 'location', 'creature', 'organization' (from LLM extraction)
+16. `game_object_refs` (tagged refs for all appearances and relationships)
+17. `book_starting_equipment` (FK → books, FK → game_objects)
 
 **Two-pass scene/choice loading**:
 1. First pass: insert all scenes, get their IDs

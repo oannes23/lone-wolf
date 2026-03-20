@@ -52,7 +52,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Roll token**: JWT signed with app secret, 1-hour expiry. Unlimited rerolls. Character limit: configurable per user, default 3.
 - **All eras**: Full support for Kai, Magnakai, Grand Master, and New Order (books 1–28+).
 - **Auth required**: All endpoints require authentication. No public access. Any authenticated user can browse all books, rules, game objects, and leaderboards. Illustrations served as static files (no auth).
-- **Token expiry**: Access token: 24 hours. Refresh token: 90 days.
+- **Token expiry**: Access token: 24 hours. Refresh token: 7 days.
 - **Admin bootstrap**: First admin created via CLI command (`scripts/create_admin.py`). No public admin registration endpoint.
 - **Data-driven start scene**: `books.start_scene_number` column (default 1) instead of hardcoding.
 - **Leaderboards**: Rich completion stats per book (fewest deaths, fewest decisions, highest END at victory, most common death scenes, discipline popularity, item usage rates). Derived from existing tables via aggregate queries.
@@ -93,7 +93,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Item combat bonuses**: Stored in item game_object `properties` JSON (`combat_bonus`, `special_vs`, `damage_multiplier`). `effective_combat_skill()` checks equipped weapon properties. See game-engine.md.
 - **Gold deduction on choose**: Gold-gated choices auto-deduct `int(condition_value)` gold on selection. See api.md and game-engine.md Scene Transition.
 - **Era-scoped disciplines and CRT**: `disciplines` and `combat_results` use `era` column instead of `book_id` FK. One set per era, shared by all books in that era. See data-model.md.
-- **Stateless refresh tokens**: JWT with 90-day expiry, no server storage. Password change invalidates via `issued_at` check. See api.md Authentication.
+- **Stateless refresh tokens**: JWT with 7-day expiry, no server storage. Password change invalidates via `issued_at` check. See api.md Authentication.
 - **Advance wizard explicit init**: `POST /gameplay/{id}/advance` required to start book advance wizard. No lazy-init. Replay available until player commits. See api.md Book Advance Wizard.
 - **Single wizard path**: `/characters/{id}/wizard` is the canonical path for both creation and advance wizards. No `/gameplay/` alias. See api.md.
 - **Auto-apply gold/meals**: Gold and meal `scene_items` are auto-applied during phase progression (no accept/decline). Only weapon/backpack/special items need explicit pickup. See game-engine.md Phase Progression.

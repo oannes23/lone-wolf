@@ -17,6 +17,7 @@ These tables are populated by the parser and are read-only at runtime (except vi
 | `era` | `String(20)` | `kai`, `magnakai`, `grand_master`, `new_order` |
 | `series` | `String(20)` | `lone_wolf` (future: `grey_star`, `freeway_warrior`) |
 | `start_scene_number` | `Integer` | Starting scene number for this book. Default 1. |
+| `max_total_picks` | `Integer` | Maximum items player may pick during equipment wizard step (Book 1 = 1, Book 2 = 2, Book 3 = 2, Book 4 = 6, Book 5 = 4). Single source of truth for pick limits. |
 
 ### `scenes`
 
@@ -25,8 +26,8 @@ Gameplay-specific data for each numbered passage. Each scene also has a correspo
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | Auto-increment |
-| `game_object_id` | `Integer` FK → `game_objects.id` | 1:1 link to the game_objects taxonomy entry for this scene |
-| `book_id` | `Integer` FK → `books.id` | |
+| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT | 1:1 link to the game_objects taxonomy entry for this scene |
+| `book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | |
 | `number` | `Integer` | Scene number within book |
 | `html_id` | `String(20)` | Anchor name from source, e.g. `sect1` |
 | `narrative` | `Text` | Full narrative HTML (styled for display) |
@@ -45,8 +46,8 @@ Gameplay-specific data for each numbered passage. Each scene also has a correspo
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `scene_id` | `Integer` FK → `scenes.id` | Source scene |
-| `target_scene_id` | `Integer` FK → `scenes.id` NULLABLE | Destination (null if unresolvable) |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | Source scene |
+| `target_scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT NULLABLE | Destination (null if unresolvable) |
 | `target_scene_number` | `Integer` | Raw target number from XHTML |
 | `raw_text` | `Text` | Original choice text from XHTML |
 | `display_text` | `Text` | Rewritten text (Haiku-generated, page-agnostic) |
@@ -62,10 +63,10 @@ Outcome bands for choice-triggered random rolls. When a choice leads to a roll (
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `choice_id` | `Integer` FK → `choices.id` | Parent choice (has `target_scene_id = null`) |
+| `choice_id` | `Integer` FK → `choices.id` ON DELETE RESTRICT | Parent choice (has `target_scene_id = null`) |
 | `range_min` | `Integer` | Lower bound of number range (0–9) |
 | `range_max` | `Integer` | Upper bound of number range (0–9) |
-| `target_scene_id` | `Integer` FK → `scenes.id` | Destination scene for this outcome |
+| `target_scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | Destination scene for this outcome |
 | `target_scene_number` | `Integer` | Raw target number from XHTML |
 | `narrative_text` | `Text` NULLABLE | Flavor text for this outcome |
 | `source` | `String(10)` | `auto` or `manual` |
@@ -79,8 +80,8 @@ Distinct from `random_outcomes` (phase-based random effects) and from choices wi
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `scene_id` | `Integer` FK → `scenes.id` | |
-| `foe_game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to foe game_object |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | |
+| `foe_game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT NULLABLE | Link to foe game_object |
 | `enemy_name` | `String(100)` | e.g. `Kraan`, `Giak 1` (denormalized from game_object if linked) |
 | `enemy_cs` | `Integer` | Enemy Combat Skill |
 | `enemy_end` | `Integer` | Enemy Endurance |
@@ -109,6 +110,8 @@ The standard Combat Results Table — era-scoped (same CRT shared by all books i
 
 The CRT has 13 combat ratio brackets × 10 random numbers = 130 rows per era. `NULL` in `enemy_loss` or `hero_loss` represents an instant kill (`k`).
 
+**Sentinel values for bracket edges**: Bracket 1 (CR ≤ −11) uses `combat_ratio_min = -999`. Bracket 13 (CR ≥ +11) uses `combat_ratio_max = 999`. CRT lookup query: `WHERE combat_ratio_min <= :ratio AND combat_ratio_max >= :ratio`.
+
 ### `disciplines`
 
 | Column | Type | Notes |
@@ -129,8 +132,8 @@ Items that can be picked up or lost in a scene. Weapon/backpack/special items wi
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `scene_id` | `Integer` FK → `scenes.id` | |
-| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object (taxonomy) |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | |
+| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT NULLABLE | Link to item game_object (taxonomy) |
 | `item_name` | `String(100)` | Display name |
 | `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `gold`, `meal` |
 | `quantity` | `Integer` | Default 1; for gold, the amount |
@@ -158,7 +161,7 @@ Outcome bands for phase-based random rolls. Each row represents one outcome for 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `scene_id` | `Integer` FK → `scenes.id` | |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | |
 | `roll_group` | `Integer` | Roll group within the scene. Default 0. Scenes with multiple sequential rolls use groups 0, 1, 2, etc. |
 | `range_min` | `Integer` | Lower bound of number range (0–9) |
 | `range_max` | `Integer` | Upper bound of number range (0–9) |
@@ -177,7 +180,7 @@ Special combat rules that apply to specific encounters.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `combat_encounter_id` | `Integer` FK → `combat_encounters.id` | |
+| `combat_encounter_id` | `Integer` FK → `combat_encounters.id` ON DELETE RESTRICT | |
 | `modifier_type` | `String(30)` | `cs_bonus`, `cs_penalty`, `double_damage`, `undead`, `enemy_mindblast`, etc. |
 | `modifier_value` | `String(100)` NULLABLE | Numeric or descriptive |
 | `condition` | `String(200)` NULLABLE | When the modifier applies |
@@ -197,9 +200,9 @@ A Kind-based knowledge graph of the Lone Wolf universe. All world entities, item
 | `kind` | `String(30)` | `character`, `location`, `creature`, `organization`, `item`, `foe`, `scene` |
 | `name` | `String(200)` | Canonical name |
 | `description` | `Text` NULLABLE | LLM-generated or admin-written summary |
-| `aliases` | `Text` NULLABLE | JSON array of alternate names (e.g. `["Lone Wolf", "Silent Wolf", "Grand Master"]`) |
-| `properties` | `Text` NULLABLE | JSON blob for kind-specific data (see below) |
-| `first_book_id` | `Integer` FK → `books.id` NULLABLE | Book of first appearance |
+| `aliases` | `Text` NOT NULL | JSON array of alternate names (e.g. `["Lone Wolf", "Silent Wolf", "Grand Master"]`). Default `[]`. Never NULL — SQLAlchemy `default=list`, `server_default='[]'`. |
+| `properties` | `Text` NOT NULL | JSON blob for kind-specific data (see below). Default `{}`. Never NULL — SQLAlchemy `default=dict`, `server_default='{}'`. |
+| `first_book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT NULLABLE | Book of first appearance |
 | `source` | `String(10)` | `auto` or `manual` |
 
 **Unique constraint**: `(name, kind)`
@@ -220,8 +223,8 @@ Minimal tagged refs following the ops.md pattern. Replaces separate appearances 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `source_id` | `Integer` FK → `game_objects.id` | |
-| `target_id` | `Integer` FK → `game_objects.id` | |
+| `source_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT | |
+| `target_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT | |
 | `tags` | `Text` | JSON array encoding category + type/role (see examples below) |
 | `metadata` | `Text` NULLABLE | JSON blob for context, notes, quantities, etc. |
 | `source` | `String(10)` | `auto` or `manual` |
@@ -244,8 +247,8 @@ Defines carry-over rules between books. Populated by parser or admin.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `from_book_id` | `Integer` FK → `books.id` | Book being completed |
-| `to_book_id` | `Integer` FK → `books.id` | Next book |
+| `from_book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | Book being completed |
+| `to_book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | Next book |
 | `max_weapons` | `Integer` | How many weapons can carry over |
 | `max_backpack_items` | `Integer` | How many backpack items carry over |
 | `special_items_carry` | `Boolean` | Whether special items carry over |
@@ -264,14 +267,15 @@ Available equipment for character creation per book. Drives the equipment wizard
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `book_id` | `Integer` FK → `books.id` | |
-| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object |
+| `book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | |
+| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT NULLABLE | Link to item game_object |
 | `item_name` | `String(100)` | Display name |
 | `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `gold`, `meal` |
-| `category` | `String(30)` | Grouping for pick limits (e.g., `weapons`, `backpack`, `special`) |
-| `max_picks_in_category` | `Integer` NULLABLE | How many items can be picked from this category |
+| `category` | `String(30)` | Grouping for display (e.g., `weapons`, `backpack`, `special`) |
 | `is_default` | `Boolean` | Whether this item is given automatically (not a choice) |
 | `source` | `String(10)` | `auto` or `manual` |
+
+Note: The pick limit is stored on `books.max_total_picks` (not per-row). `max_picks_in_category` has been removed — the limit is global, not per-category.
 
 ## Player Tables
 
@@ -292,14 +296,15 @@ Available equipment for character creation per book. Drives the equipment wizard
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `user_id` | `Integer` FK → `users.id` | |
+| `user_id` | `Integer` FK → `users.id` ON DELETE RESTRICT | |
 | `name` | `String(100)` | Player-chosen name |
-| `book_id` | `Integer` FK → `books.id` | Current book |
-| `current_scene_id` | `Integer` FK → `scenes.id` NULLABLE | Current position |
-| `scene_phase` | `String(20)` NULLABLE | Current phase within scene: `items`, `eat`, `combat`, `heal`, `choices`. Null if no active phase processing. |
+| `book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | Current book |
+| `current_scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT NULLABLE | Current position |
+| `scene_phase` | `String(20)` NULLABLE | Current phase within scene: `items`, `combat`, `random`, `choices`. Null if no active phase. Automatic phases (`eat`, `heal`, `item_loss`, `backpack_loss`) are never stored here — they complete atomically during transitions. |
 | `scene_phase_index` | `Integer` NULLABLE | Index into the scene's phase sequence (0-based). |
-| `active_combat_encounter_id` | `Integer` FK → `combat_encounters.id` NULLABLE | Set when combat begins, cleared on win/loss/evasion. |
-| `active_wizard_id` | `Integer` FK → `character_wizard_progress.id` NULLABLE | Set when character is in any wizard (creation, book advance). Null when not in a wizard. |
+| `active_combat_encounter_id` | `Integer` FK → `combat_encounters.id` ON DELETE SET NULL NULLABLE | Set when combat begins, cleared on win/loss/evasion. |
+| `active_wizard_id` | `Integer` FK → `character_wizard_progress.id` ON DELETE SET NULL NULLABLE | Set when character is in any wizard (creation, book advance). Null when not in a wizard. |
+| `pending_choice_id` | `Integer` FK → `choices.id` ON DELETE RESTRICT NULLABLE | Set when `/choose` returns `requires_roll: true`, cleared on `/roll` resolution. Classified as Ref field. |
 | `combat_skill_base` | `Integer` | Initial CS (10 + random 0–9) |
 | `endurance_base` | `Integer` | Initial END (20 + random 0–9) |
 | `endurance_max` | `Integer` | Maximum END (base + permanent bonuses like lore-circles). Healing caps at this value. |
@@ -321,9 +326,9 @@ Available equipment for character creation per book. Drives the equipment wizard
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `discipline_id` | `Integer` FK → `disciplines.id` | |
-| `weapon_type` | `String(30)` NULLABLE | Only for Weaponskill/Weaponmastery |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `discipline_id` | `Integer` FK → `disciplines.id` ON DELETE RESTRICT | |
+| `weapon_category` | `String(30)` NULLABLE | Only for Weaponskill/Weaponmastery |
 
 **Unique constraint**: `(character_id, discipline_id)`
 
@@ -332,8 +337,8 @@ Available equipment for character creation per book. Drives the equipment wizard
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `game_object_id` | `Integer` FK → `game_objects.id` NULLABLE | Link to item game_object (taxonomy). Parser links when possible. |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT NULLABLE | Link to item game_object (taxonomy). Parser links when possible. |
 | `item_name` | `String(100)` | |
 | `item_type` | `String(20)` | `weapon`, `backpack`, `special` |
 | `is_equipped` | `Boolean` | For weapons |
@@ -347,8 +352,8 @@ Snapshot of character state at the beginning of each book, used for death-restar
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `book_id` | `Integer` FK → `books.id` | |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | |
 | `combat_skill_base` | `Integer` | |
 | `endurance_base` | `Integer` | |
 | `endurance_max` | `Integer` | Snapshot of endurance_max at book start |
@@ -361,6 +366,26 @@ Snapshot of character state at the beginning of each book, used for death-restar
 
 **Unique constraint**: `(character_id, book_id)`
 
+**Snapshot JSON schemas**:
+
+`items_json` — array of item objects:
+```json
+[
+  {"item_name": "Sword", "item_type": "weapon", "is_equipped": true, "game_object_id": 42},
+  {"item_name": "Healing Potion", "item_type": "backpack", "is_equipped": false, "game_object_id": null}
+]
+```
+Fields: `item_name` (str), `item_type` (str: `weapon`, `backpack`, `special`), `is_equipped` (bool), `game_object_id` (int or null).
+
+`disciplines_json` — array of discipline objects:
+```json
+[
+  {"discipline_id": 3, "weapon_category": null},
+  {"discipline_id": 6, "weapon_category": "Sword"}
+]
+```
+Fields: `discipline_id` (int), `weapon_category` (str or null — only set for Weaponskill/Weaponmastery entries).
+
 ### `decision_log`
 
 Every choice the character makes, for full history and replay. Tagged by run.
@@ -368,11 +393,11 @@ Every choice the character makes, for full history and replay. Tagged by run.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
 | `run_number` | `Integer` | Which attempt at this book (1-indexed) |
-| `from_scene_id` | `Integer` FK → `scenes.id` | |
-| `to_scene_id` | `Integer` FK → `scenes.id` | |
-| `choice_id` | `Integer` FK → `choices.id` NULLABLE | Null for combat/random outcomes |
+| `from_scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | |
+| `to_scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | |
+| `choice_id` | `Integer` FK → `choices.id` ON DELETE RESTRICT NULLABLE | Null for combat/random outcomes |
 | `action_type` | `String(20)` | `choice`, `combat_win`, `combat_evasion`, `random`, `death`, `restart`, `replay` |
 | `details` | `Text` NULLABLE | JSON blob for combat rounds, items gained/lost, etc. |
 | `created_at` | `DateTime` | |
@@ -384,8 +409,8 @@ Full round-by-round combat history. Current combat state derived from latest rou
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `combat_encounter_id` | `Integer` FK → `combat_encounters.id` | |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `combat_encounter_id` | `Integer` FK → `combat_encounters.id` ON DELETE RESTRICT | |
 | `round_number` | `Integer` | 1-indexed |
 | `random_number` | `Integer` | Server-generated, 0–9 |
 | `combat_ratio` | `Integer` | Computed CR for this round |
@@ -405,15 +430,15 @@ Generic state-change audit trail. One row per phase step completion. Tracks ever
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `scene_id` | `Integer` FK → `scenes.id` | Scene where the event occurred |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT | Scene where the event occurred |
 | `run_number` | `Integer` | Which attempt at this book |
 | `event_type` | `String(30)` | `item_pickup`, `item_decline`, `item_loss`, `item_loss_skip`, `item_consumed`, `meal_consumed`, `meal_penalty`, `gold_change`, `endurance_change`, `healing`, `combat_start`, `combat_end`, `combat_skipped`, `evasion`, `death`, `restart`, `replay`, `discipline_gained`, `book_advance`, `random_roll`, `backpack_loss` |
 | `phase` | `String(20)` NULLABLE | Which scene phase produced this event |
 | `details` | `Text` NULLABLE | JSON blob with event-specific data |
 | `seq` | `Integer` | Per-character sequence number. Strict ordering independent of timestamp. Generated via `SELECT MAX(seq)+1 WHERE character_id=?` within the same transaction. Safe because optimistic locking prevents concurrent character mutations. |
 | `operations` | `Text` NULLABLE | JSON array of ops.md operations (e.g., `[{"op": "meter.delta", "field": "endurance_current", "delta": -3}]`). Records mechanical mutations alongside semantic event_type. |
-| `parent_event_id` | `Integer` FK → `character_events.id` NULLABLE | Causality chain. Points to the event that triggered this one (e.g., meal_penalty → death). Null for root events. |
+| `parent_event_id` | `Integer` FK → `character_events.id` ON DELETE SET NULL NULLABLE | Causality chain. Points to the event that triggered this one (e.g., meal_penalty → death). Null for root events. |
 | `created_at` | `DateTime` | |
 
 Coexists with `decision_log` (navigation/choice history) and `combat_rounds` (round-by-round combat detail). The events table captures state mutations; the other tables capture gameplay decisions and combat mechanics.
@@ -435,6 +460,7 @@ Classification of each `characters` column by ops.md field layer:
 | `current_scene_id` | Ref | Current position |
 | `active_combat_encounter_id` | Ref | Current combat |
 | `active_wizard_id` | Ref | Current wizard |
+| `pending_choice_id` | Ref | Set during choice-triggered roll, cleared on resolution |
 | `death_count`, `current_run` | Spec | Incremented on restart/replay |
 | `version` | Metadata | Optimistic locking counter |
 | `rule_overrides` | Spec | Per-character config |
@@ -458,7 +484,7 @@ Data-driven wizard system used by both character creation and book advance.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `template_id` | `Integer` FK → `wizard_templates.id` | |
+| `template_id` | `Integer` FK → `wizard_templates.id` ON DELETE RESTRICT | |
 | `step_type` | `String(30)` | `stat_roll`, `pick_disciplines`, `pick_equipment`, `pick_weapon_skill`, `inventory_adjust`, `confirm` |
 | `config` | `Text` NULLABLE | JSON config for the step (e.g., `{"count": 5}` for discipline count, `{"categories": ["weapons", "backpack"]}` for equipment) |
 | `ordinal` | `Integer` | Order within the wizard |
@@ -468,12 +494,37 @@ Data-driven wizard system used by both character creation and book advance.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `character_id` | `Integer` FK → `characters.id` | |
-| `wizard_template_id` | `Integer` FK → `wizard_templates.id` | |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
+| `wizard_template_id` | `Integer` FK → `wizard_templates.id` ON DELETE RESTRICT | |
 | `current_step_index` | `Integer` | 0-based index into wizard_template_steps |
 | `state` | `Text` NULLABLE | JSON blob for accumulated wizard state (selected disciplines, rolled stats, equipment choices, etc.) |
 | `started_at` | `DateTime` | |
 | `completed_at` | `DateTime` NULLABLE | |
+
+**Wizard state JSON schemas** (stored in `state` column):
+
+Character creation state (accumulated as player progresses through `pick_equipment` and `confirm` steps):
+```json
+{
+  "gold": 7,
+  "meals": 1,
+  "selected_items": [
+    {"item_name": "Sword", "item_type": "weapon", "game_object_id": 12}
+  ]
+}
+```
+
+Book advance state (accumulated as player progresses through `pick_disciplines`, `pick_equipment`, `inventory_adjust`, and `confirm` steps):
+```json
+{
+  "new_disciplines": [11],
+  "weapon_category": "Sword",
+  "kept_weapons": ["Sword", "Axe"],
+  "kept_backpack": ["Healing Potion"],
+  "gold_rolled": 14
+}
+```
+Fields: `new_disciplines` (list of discipline IDs), `weapon_category` (str or null — only set when picked discipline is Weaponskill/Weaponmastery), `kept_weapons` (list of weapon names to carry forward), `kept_backpack` (list of backpack item names), `gold_rolled` (int — the gold roll result, added to existing gold).
 
 ## Admin Tables
 
@@ -495,14 +546,14 @@ Player-submitted bug reports.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `user_id` | `Integer` FK → `users.id` | Reporter |
-| `character_id` | `Integer` FK → `characters.id` NULLABLE | Character at time of report |
-| `scene_id` | `Integer` FK → `scenes.id` NULLABLE | Scene where issue occurred |
+| `user_id` | `Integer` FK → `users.id` ON DELETE RESTRICT | Reporter |
+| `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT NULLABLE | Character at time of report |
+| `scene_id` | `Integer` FK → `scenes.id` ON DELETE RESTRICT NULLABLE | Scene where issue occurred |
 | `tags` | `Text` | JSON array of category tags |
 | `free_text` | `Text` NULLABLE | Optional description |
 | `status` | `String(20)` | `open`, `triaging`, `resolved`, `wont_fix` |
 | `admin_notes` | `Text` NULLABLE | Admin triage notes |
-| `resolved_by` | `Integer` FK → `admin_users.id` NULLABLE | |
+| `resolved_by` | `Integer` FK → `admin_users.id` ON DELETE RESTRICT NULLABLE | |
 | `created_at` | `DateTime` | |
 | `updated_at` | `DateTime` | |
 

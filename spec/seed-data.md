@@ -224,8 +224,9 @@ Pre-wizard steps (dedicated endpoints):
 | step_type | ordinal | config |
 |-----------|---------|--------|
 | `pick_disciplines` | 0 | `{"count": 1}` (from book_transition_rules.new_disciplines_count) |
-| `inventory_adjust` | 1 | `null` (limits from book_transition_rules) |
-| `confirm` | 2 | `null` |
+| `pick_equipment` | 1 | `{"book_id": "<from books table>"}` |
+| `inventory_adjust` | 2 | `null` (limits from book_transition_rules) |
+| `confirm` | 3 | `null` |
 
 Pre-wizard step (dedicated endpoint):
 - `POST /gameplay/{id}/advance` — starts the wizard; transition rules looked up from book_transition_rules
@@ -251,3 +252,146 @@ Items with `endurance_bonus` in their properties increase `endurance_max` while 
 | Padded Leather Waistcoat | endurance_bonus | +2 | endurance_max (while carried) |
 | Silver Helm | combat_bonus | +2 | effective_combat_skill (while carried) |
 | Shield | combat_bonus | +2 | effective_combat_skill (while carried) |
+
+## Combat Results Table (Kai Era)
+
+One CRT per era, shared by all books in that era. The Kai era covers Books 1-5. 13 combat ratio brackets x 10 random numbers = 130 rows. `NULL` in `enemy_loss` or `hero_loss` represents an instant kill (`k`). Sentinel values: `combat_ratio_min = -999` for bracket 1 (CR <= -11); `combat_ratio_max = 999` for bracket 13 (CR >= +11).
+
+Source: Project Aon Lone Wolf gamebooks, Kai series (Books 1-5).
+
+Last verified: 2026-03-19
+
+### `combat_results` rows (era = 'kai')
+
+| era | random_number | combat_ratio_min | combat_ratio_max | enemy_loss | hero_loss |
+|-----|--------------|-----------------|-----------------|------------|-----------|
+| kai | 0 | -999 | -11 | 6 | NULL |
+| kai | 0 | -10 | -9 | 7 | NULL |
+| kai | 0 | -8 | -7 | 8 | NULL |
+| kai | 0 | -6 | -5 | 9 | NULL |
+| kai | 0 | -4 | -3 | 10 | NULL |
+| kai | 0 | -2 | -1 | 11 | NULL |
+| kai | 0 | 0 | 0 | 12 | NULL |
+| kai | 0 | 1 | 2 | 14 | NULL |
+| kai | 0 | 3 | 4 | 16 | NULL |
+| kai | 0 | 5 | 6 | 18 | NULL |
+| kai | 0 | 7 | 8 | NULL | NULL |
+| kai | 0 | 9 | 10 | NULL | NULL |
+| kai | 0 | 11 | 999 | NULL | NULL |
+| kai | 1 | -999 | -11 | 0 | NULL |
+| kai | 1 | -10 | -9 | 0 | 8 |
+| kai | 1 | -8 | -7 | 0 | 8 |
+| kai | 1 | -6 | -5 | 1 | 7 |
+| kai | 1 | -4 | -3 | 2 | 6 |
+| kai | 1 | -2 | -1 | 3 | 6 |
+| kai | 1 | 0 | 0 | 4 | 5 |
+| kai | 1 | 1 | 2 | 5 | 5 |
+| kai | 1 | 3 | 4 | 6 | 4 |
+| kai | 1 | 5 | 6 | 7 | 4 |
+| kai | 1 | 7 | 8 | 8 | 3 |
+| kai | 1 | 9 | 10 | 9 | 3 |
+| kai | 1 | 11 | 999 | 10 | 2 |
+| kai | 2 | -999 | -11 | 0 | NULL |
+| kai | 2 | -10 | -9 | 0 | 8 |
+| kai | 2 | -8 | -7 | 1 | 7 |
+| kai | 2 | -6 | -5 | 2 | 6 |
+| kai | 2 | -4 | -3 | 3 | 6 |
+| kai | 2 | -2 | -1 | 4 | 5 |
+| kai | 2 | 0 | 0 | 5 | 5 |
+| kai | 2 | 1 | 2 | 6 | 4 |
+| kai | 2 | 3 | 4 | 7 | 4 |
+| kai | 2 | 5 | 6 | 8 | 3 |
+| kai | 2 | 7 | 8 | 9 | 3 |
+| kai | 2 | 9 | 10 | 10 | 2 |
+| kai | 2 | 11 | 999 | 11 | 2 |
+| kai | 3 | -999 | -11 | 0 | 6 |
+| kai | 3 | -10 | -9 | 1 | 6 |
+| kai | 3 | -8 | -7 | 2 | 5 |
+| kai | 3 | -6 | -5 | 3 | 5 |
+| kai | 3 | -4 | -3 | 4 | 5 |
+| kai | 3 | -2 | -1 | 5 | 4 |
+| kai | 3 | 0 | 0 | 6 | 4 |
+| kai | 3 | 1 | 2 | 7 | 4 |
+| kai | 3 | 3 | 4 | 8 | 3 |
+| kai | 3 | 5 | 6 | 9 | 3 |
+| kai | 3 | 7 | 8 | 10 | 2 |
+| kai | 3 | 9 | 10 | 11 | 2 |
+| kai | 3 | 11 | 999 | 12 | 1 |
+| kai | 4 | -999 | -11 | 0 | 6 |
+| kai | 4 | -10 | -9 | 2 | 5 |
+| kai | 4 | -8 | -7 | 3 | 5 |
+| kai | 4 | -6 | -5 | 4 | 4 |
+| kai | 4 | -4 | -3 | 5 | 4 |
+| kai | 4 | -2 | -1 | 6 | 4 |
+| kai | 4 | 0 | 0 | 7 | 3 |
+| kai | 4 | 1 | 2 | 8 | 3 |
+| kai | 4 | 3 | 4 | 9 | 3 |
+| kai | 4 | 5 | 6 | 10 | 2 |
+| kai | 4 | 7 | 8 | 11 | 2 |
+| kai | 4 | 9 | 10 | 12 | 1 |
+| kai | 4 | 11 | 999 | 14 | 1 |
+| kai | 5 | -999 | -11 | 1 | 6 |
+| kai | 5 | -10 | -9 | 3 | 5 |
+| kai | 5 | -8 | -7 | 4 | 4 |
+| kai | 5 | -6 | -5 | 5 | 4 |
+| kai | 5 | -4 | -3 | 6 | 3 |
+| kai | 5 | -2 | -1 | 7 | 3 |
+| kai | 5 | 0 | 0 | 8 | 3 |
+| kai | 5 | 1 | 2 | 9 | 2 |
+| kai | 5 | 3 | 4 | 10 | 2 |
+| kai | 5 | 5 | 6 | 11 | 2 |
+| kai | 5 | 7 | 8 | 12 | 1 |
+| kai | 5 | 9 | 10 | 14 | 1 |
+| kai | 5 | 11 | 999 | 16 | 0 |
+| kai | 6 | -999 | -11 | 2 | 5 |
+| kai | 6 | -10 | -9 | 4 | 4 |
+| kai | 6 | -8 | -7 | 5 | 4 |
+| kai | 6 | -6 | -5 | 6 | 3 |
+| kai | 6 | -4 | -3 | 7 | 3 |
+| kai | 6 | -2 | -1 | 8 | 2 |
+| kai | 6 | 0 | 0 | 9 | 2 |
+| kai | 6 | 1 | 2 | 10 | 2 |
+| kai | 6 | 3 | 4 | 11 | 1 |
+| kai | 6 | 5 | 6 | 12 | 1 |
+| kai | 6 | 7 | 8 | 14 | 0 |
+| kai | 6 | 9 | 10 | 16 | 0 |
+| kai | 6 | 11 | 999 | 18 | 0 |
+| kai | 7 | -999 | -11 | 3 | 5 |
+| kai | 7 | -10 | -9 | 5 | 4 |
+| kai | 7 | -8 | -7 | 6 | 3 |
+| kai | 7 | -6 | -5 | 7 | 3 |
+| kai | 7 | -4 | -3 | 8 | 2 |
+| kai | 7 | -2 | -1 | 9 | 2 |
+| kai | 7 | 0 | 0 | 10 | 2 |
+| kai | 7 | 1 | 2 | 11 | 1 |
+| kai | 7 | 3 | 4 | 12 | 1 |
+| kai | 7 | 5 | 6 | 14 | 0 |
+| kai | 7 | 7 | 8 | 16 | 0 |
+| kai | 7 | 9 | 10 | 18 | 0 |
+| kai | 7 | 11 | 999 | NULL | 0 |
+| kai | 8 | -999 | -11 | 4 | 4 |
+| kai | 8 | -10 | -9 | 6 | 3 |
+| kai | 8 | -8 | -7 | 7 | 3 |
+| kai | 8 | -6 | -5 | 8 | 2 |
+| kai | 8 | -4 | -3 | 9 | 2 |
+| kai | 8 | -2 | -1 | 10 | 2 |
+| kai | 8 | 0 | 0 | 11 | 1 |
+| kai | 8 | 1 | 2 | 12 | 1 |
+| kai | 8 | 3 | 4 | 14 | 0 |
+| kai | 8 | 5 | 6 | 16 | 0 |
+| kai | 8 | 7 | 8 | 18 | 0 |
+| kai | 8 | 9 | 10 | NULL | 0 |
+| kai | 8 | 11 | 999 | NULL | 0 |
+| kai | 9 | -999 | -11 | 5 | 4 |
+| kai | 9 | -10 | -9 | 7 | 3 |
+| kai | 9 | -8 | -7 | 8 | 2 |
+| kai | 9 | -6 | -5 | 9 | 2 |
+| kai | 9 | -4 | -3 | 10 | 1 |
+| kai | 9 | -2 | -1 | 11 | 1 |
+| kai | 9 | 0 | 0 | 12 | 0 |
+| kai | 9 | 1 | 2 | 14 | 0 |
+| kai | 9 | 3 | 4 | 16 | 0 |
+| kai | 9 | 5 | 6 | 18 | 0 |
+| kai | 9 | 7 | 8 | NULL | 0 |
+| kai | 9 | 9 | 10 | NULL | 0 |
+| kai | 9 | 11 | 999 | NULL | 0 |

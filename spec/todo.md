@@ -297,13 +297,13 @@ Nine specialist agents (game-designer, frontend-dev, architect, qa-engineer, db-
 
 ### Spec Bugs (fix during next spec update)
 
-- **A. api.md POST /characters response example**: Shows `total_steps: 3, step_index: 2` — should be `total_steps: 2, step_index: 0` per resolved 2-step wizard (todo #8). *(tech-writer)* — **Approved**
-- **B. game-engine.md Laumspur amount**: Shows `amount: 2`; seed-data.md shows `amount: 4`. Source books confirm 4. *(game-designer, qa-engineer)* — **Approved**
-- **C. api.md pending_items example**: Gold Crowns listed in `pending_items`, but gold is auto-applied per spec (todo #13) — should not appear as a pending item. *(tech-writer)* — **Approved**
-- **D. parser.md Load Phase numbering**: Step 7 missing (jumps 6→8). Renumber sequentially. *(tech-writer, db-admin)* — **Approved**
-- **E. parser.md Load Phase step 2**: Says `FK → books` for disciplines; should say "era-scoped, no book FK" per todo #9. *(tech-writer)* — **Approved**
-- **F. parser.md Load Phase step 11**: Says `FK → books` for combat_results; should say "era-scoped" per todo #29. *(tech-writer, qa-engineer)* — **Approved**
-- **G. data-model.md column name**: `character_disciplines.weapon_type` should be `weapon_category` to match `weapon_categories.category` and glossary usage. *(tech-writer)* — **Approved**
+- **A. api.md POST /characters response example**: Shows `total_steps: 3, step_index: 2` — should be `total_steps: 2, step_index: 0` per resolved 2-step wizard (todo #8). *(tech-writer)* — **Approved** — **Applied 2026-03-19**
+- **B. game-engine.md Laumspur amount**: Shows `amount: 2`; seed-data.md shows `amount: 4`. Source books confirm 4. *(game-designer, qa-engineer)* — **Approved** — **Applied 2026-03-19**
+- **C. api.md pending_items example**: Gold Crowns listed in `pending_items`, but gold is auto-applied per spec (todo #13) — should not appear as a pending item. *(tech-writer)* — **Approved** — **Applied 2026-03-19**
+- **D. parser.md Load Phase numbering**: Step 7 missing (jumps 6→8). Renumber sequentially. *(tech-writer, db-admin)* — **Approved** — **Applied 2026-03-19**
+- **E. parser.md Load Phase step 2**: Says `FK → books` for disciplines; should say "era-scoped, no book FK" per todo #9. *(tech-writer)* — **Approved** — **Applied 2026-03-19**
+- **F. parser.md Load Phase step 11**: Says `FK → books` for combat_results; should say "era-scoped" per todo #29. *(tech-writer, qa-engineer)* — **Approved** — **Applied 2026-03-19**
+- **G. data-model.md column name**: `character_disciplines.weapon_type` should be `weapon_category` to match `weapon_categories.category` and glossary usage. *(tech-writer)* — **Approved** — **Applied 2026-03-19**
 
 ### Game Mechanics
 

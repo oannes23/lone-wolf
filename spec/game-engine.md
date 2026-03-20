@@ -212,6 +212,49 @@ def evade_combat(character, encounter):
 
 Combat encounters reference foe game_objects via `foe_game_object_id`. Enemy stats (cs, end) are also stored inline on `combat_encounters` for direct gameplay use (denormalized from the game_object). The game_object link enables taxonomy queries like "in which scenes does this enemy appear?"
 
+### Special Weapon Effects
+
+Some weapons have special bonuses against specific foe types (e.g., Sommerswerd is especially effective against undead). Foe type is modeled via `combat_modifiers.modifier_type` (e.g., `'undead'`, `'helghast'`). The engine checks the equipped weapon's `special_vs` property against the encounter's modifier types.
+
+```python
+def apply_special_weapon_effects(equipped_weapon, encounter_modifiers, enemy_loss):
+    """
+    Check equipped weapon for special_vs match against encounter modifier types.
+    Returns (adjusted_cs_bonus, adjusted_enemy_loss).
+
+    special_vs: str matching a modifier_type on the encounter (e.g., 'undead')
+    damage_multiplier: int — multiplies CRT enemy_loss on a match (e.g., 2 = double damage)
+    combat_bonus_vs_special: int — CS bonus applied instead of base combat_bonus on a match
+    """
+    if equipped_weapon is None:
+        return 0, enemy_loss
+
+    props = equipped_weapon.properties
+    special_vs = props.get("special_vs")
+    if special_vs is None:
+        return props.get("combat_bonus", 0), enemy_loss
+
+    # Check if any encounter modifier matches the weapon's special_vs type
+    modifier_types = [m.modifier_type for m in encounter_modifiers]
+    if special_vs in modifier_types:
+        # Special match: use combat_bonus_vs_special (replaces, does not stack with, base combat_bonus)
+        cs_bonus = props.get("combat_bonus_vs_special", props.get("combat_bonus", 0))
+        # Apply damage multiplier to CRT enemy_loss
+        multiplier = props.get("damage_multiplier", 1)
+        adjusted_enemy_loss = enemy_loss * multiplier if enemy_loss is not None else None
+        return cs_bonus, adjusted_enemy_loss
+    else:
+        # No match: use base combat_bonus
+        return props.get("combat_bonus", 0), enemy_loss
+```
+
+- **Decision**: `combat_bonus_vs_special` replaces (does not stack with) the base `combat_bonus` when a special match is detected.
+- **Rationale**: The Sommerswerd's power against undead is absolute — the special bonus is the relevant one, not a combination.
+- **Implications**: `effective_combat_skill()` calls `apply_special_weapon_effects()` instead of directly reading `combat_bonus` from the weapon properties. The `damage_multiplier` is applied in `resolve_combat_round()` after the CRT lookup. A `damage_multiplier` of `None` means instant kill (same sentinel as CRT `enemy_loss = None`).
+
+**Item properties for special weapons** (stored on game_object `properties` JSON):
+- `{"combat_bonus": 8, "special_vs": "undead", "damage_multiplier": 2, "combat_bonus_vs_special": 10}` — Sommerswerd (example: +8 normally, +10 + double damage vs undead)
+
 ## State Machine
 
 ### Scene Phase System
@@ -297,6 +340,38 @@ The character's position in the phase sequence is tracked by `scene_phase` and `
 8. Increment character.version after each state mutation
 ```
 
+#### scene_phase State Diagram
+
+The `scene_phase` column on `characters` tracks the character's current interactive position in the phase sequence. Only interactive phases are stored — automatic phases complete atomically without ever being persisted in `scene_phase`.
+
+**Valid interactive values** (client-visible):
+
+| Value | Meaning |
+|-------|---------|
+| `items` | Character is in the item pickup/decline phase. One or more `scene_items` with `action='gain'` are pending. |
+| `combat` | Character is in an active combat encounter. `active_combat_encounter_id` is set. |
+| `random` | Character must roll. A `random_outcomes` phase is pending, or all scene exits are random-gated. |
+| `choices` | Character has resolved all preceding phases and may now select a choice to advance. Terminal phase. |
+
+**`null` means no active phase:**
+- Character is dead (`is_alive = false`)
+- Character is in a wizard (`active_wizard_id` is set)
+- Character is at a death or victory scene
+- Character is between scenes (transitioning)
+
+**Automatic phases are never stored in `scene_phase`:**
+
+The phases `eat`, `heal`, `item_loss`, and `backpack_loss` complete atomically during transition endpoint calls (`/choose`, `/roll`, `/restart`, `/replay`, `/combat/evade`). By the time the client reads the scene via `GET /scene`, these phases have already resolved and their results appear in `phase_results`.
+
+**State transitions:**
+
+```
+null → items → combat → random → choices → null (on /choose or /roll exit)
+         ↑ (any interactive phase can transition directly to null on death)
+```
+
+Multiple interactive phases may appear in sequence (e.g., `items` then `combat` then `choices`). Each transition endpoint advances `scene_phase` to the next interactive phase, running any automatic phases in between.
+
 **Automatic phase results**: Since `eat` and `heal` (and `item_loss`, `backpack_loss`) are automatic, their results are reported in the `phase_results` array on the scene response. The client never sees `scene_phase = "eat"` — by the time it reads the scene, automatic phases have already resolved.
 
 **Phase result severity**: Each entry in `phase_results` includes a `severity` field to guide UI presentation:
@@ -330,6 +405,33 @@ Each phase completion logs a `character_event` with the phase type and details.
 9. Increment character.version
 10. Return new scene state (with current phase info)
 ```
+
+### Scene Response Assembly
+
+`GET /gameplay/{id}/scene` is strictly **read-only**. It never mutates character state. It assembles the scene response from:
+
+1. Current character state (`characters` row + related tables)
+2. Persisted phase results from `character_events` for the current scene visit (the automatic phase results logged during the most recent transition)
+3. Current scene content (narrative, choices, combat encounters, pending items)
+
+**Transition endpoints run automatic phases synchronously:**
+
+When a transition endpoint is called (`/choose`, `/roll`, `/restart`, `/replay`, `/combat/evade`), the server:
+
+```
+1. Executes the requested action (navigate, roll, restart, etc.)
+2. Enters the new scene
+3. Runs all automatic phases (backpack_loss, item_loss, eat, heal) synchronously
+4. Logs each automatic phase result as a character_event
+5. Stops at the first interactive phase (items, combat, random, choices)
+6. Returns the assembled scene response (same shape as GET /scene)
+```
+
+The client never needs to poll or make a follow-up call to see automatic phase results. They are included in the transition response's `phase_results` array and are also accessible via `GET /scene` on any subsequent call.
+
+- **Decision**: Automatic phases run at transition time, not lazily on GET.
+- **Rationale**: Keeps GET /scene simple and idempotent. Prevents state inconsistencies where a phase partially runs across two requests. Makes the transition response self-contained.
+- **Implications**: If an automatic phase causes death (e.g., starvation during the eat phase), the transition response already reflects the dead state. The client does not need to re-fetch.
 
 ### Choice Filtering
 
@@ -395,6 +497,30 @@ def enter_scene(character, scene):
     # ... normal phase progression
 ```
 
+### Death During Phase Progression
+
+When `endurance_current` reaches 0 during any phase (combat damage, meal penalty, evasion damage, random effect), phase progression halts immediately. The character cannot continue to the next phase.
+
+```python
+def on_death_during_phase(character, causing_event_id):
+    """Called whenever apply_endurance_delta() triggers death mid-phase."""
+    character.is_alive = False
+    character.scene_phase = None
+    character.scene_phase_index = None
+    character.active_combat_encounter_id = None
+    character.version += 1
+    log_character_event(
+        character,
+        event_type='death',
+        parent_event_id=causing_event_id  # points to combat_end, meal_penalty, evasion, random_roll, etc.
+    )
+    # No further phases run. Only /restart is available.
+```
+
+- **Decision**: Death halts phase progression immediately and clears all active phase state.
+- **Rationale**: A dead character has no meaningful game state. Clearing phase fields prevents stale state from persisting across a restart.
+- **Implications**: The `death` event always has a `parent_event_id` pointing to the event that caused the fatal damage. After death, only `POST /gameplay/{id}/restart` is available. All other gameplay endpoints return 409 with `error_code: CHARACTER_DEAD`.
+
 ### Death and Restart
 
 - **Decision**: On death, the character can restart from the beginning of the current book.
@@ -445,6 +571,41 @@ def compute_endurance_max(endurance_base, disciplines, carried_items):
 ```
 
 Endurance max is recalculated when disciplines change (new discipline learned, book transition). The value is stored on the character for fast reads and snapshotted in `character_book_starts`.
+
+### endurance_max Recalculation Invariant
+
+`endurance_max` must be recalculated (and `endurance_current` clamped) whenever the set of inputs to `compute_endurance_max()` changes.
+
+**Trigger points:**
+
+| Trigger | Reason |
+|---------|--------|
+| Item pickup (weapon, special, backpack) | Item may have `endurance_bonus` property |
+| Item drop | Removing an item with `endurance_bonus` lowers the max |
+| Item loss (scene event) | Same as drop |
+| Backpack loss | Bulk removal of items that may have `endurance_bonus` |
+| Discipline gained | Lore-circle completion may add END bonus |
+| Wizard completion (character creation or book advance) | Multiple changes applied at once — recalculate after all changes are applied |
+| Restart / replay | Restoring from snapshot — recalculate after snapshot is applied to confirm stored max is consistent |
+
+**Clamping rule:**
+
+```python
+def recalculate_endurance_max(character):
+    new_max = compute_endurance_max(
+        character.endurance_base,
+        character.disciplines,
+        character.items
+    )
+    character.endurance_max = new_max
+    if character.endurance_current > new_max:
+        character.endurance_current = new_max  # clamp — never exceed max
+    character.version += 1
+```
+
+- **Decision**: Always clamp `endurance_current` to the new max if it would exceed it.
+- **Rationale**: If an item with an endurance bonus is removed, the max decreases. Without clamping, the character would have current endurance above their new maximum — an illegal state.
+- **Implications**: Dropping a bonus item mid-scene can reduce `endurance_current`. This is intentional and book-accurate.
 
 ### Healing and Evasion
 
@@ -542,15 +703,16 @@ Pre-wizard steps (dedicated endpoints, not wizard-managed):
 - Stat rolling: `POST /characters/roll` (repeatable, stateless)
 - Character creation + discipline/weapon skill selection: `POST /characters` (creates character, auto-starts wizard)
 
-**`book_advance` template** (3 steps):
+**`book_advance` template** (4 steps):
 
 | Step | step_type | config | API call |
 |------|-----------|--------|----------|
 | 0 | `pick_disciplines` | `{"count": 1}` (from book_transition_rules.new_disciplines_count) | `POST /characters/{id}/wizard` |
-| 1 | `inventory_adjust` | `null` (limits from book_transition_rules) | `POST /characters/{id}/wizard` |
-| 2 | `confirm` | `null` | `POST /characters/{id}/wizard` |
+| 1 | `pick_equipment` | `{"book_id": "<from books table>"}` | `POST /characters/{id}/wizard` |
+| 2 | `inventory_adjust` | `null` (limits from book_transition_rules) | `POST /characters/{id}/wizard` |
+| 3 | `confirm` | `null` | `POST /characters/{id}/wizard` |
 
-The advance wizard is started explicitly via `POST /gameplay/{id}/advance`. Until initiated, replay remains available at victory scenes.
+The `pick_equipment` step (ordinal 1) provides equipment available at the start of the new book, separate from the carried inventory managed in `inventory_adjust`. The advance wizard is started explicitly via `POST /gameplay/{id}/advance`. Until initiated, replay remains available at victory scenes.
 
 ### Wizard State
 
@@ -576,17 +738,22 @@ Multi-step process for transitioning between books. Uses the generic wizard syst
 ### Wizard Steps
 
 ```
-Step 1: Discipline Selection
+Step 1: Discipline Selection (pick_disciplines)
   - Server presents available disciplines for the new era (excluding already-learned ones)
   - Player picks N new disciplines (count from book_transition_rules)
 
-Step 2: Inventory Adjustment
+Step 2: Equipment Selection (pick_equipment)
+  - Server presents starting equipment available at the beginning of the new book
+  - Player picks from available weapons and backpack items (per book's max_total_picks)
+  - This is new equipment granted at the book start, separate from carried inventory
+
+Step 3: Inventory Adjustment (inventory_adjust)
   - Server presents current inventory and carry-over limits (from book_transition_rules)
-  - Player selects which weapons and backpack items to keep
+  - Player selects which carried weapons and backpack items to keep
   - Special items carry over automatically (if rules allow)
   - Gold carries over (if rules allow, still capped at 50)
 
-Step 3: Confirmation
+Step 4: Confirmation (confirm)
   - Server shows summary of new character state
   - Player confirms
   - Character moves to start scene of the new book
@@ -701,7 +868,7 @@ def use_consumable(character, item):
 
 **Item properties for consumable items** (stored on game_object `properties` JSON):
 - `{"consumable": true, "effect": "endurance_restore", "amount": 4}` — Healing Potion
-- `{"consumable": true, "effect": "endurance_restore", "amount": 2}` — Laumspur
+- `{"consumable": true, "effect": "endurance_restore", "amount": 4}` — Laumspur
 
 **Item properties for special weapons** (stored on game_object `properties` JSON):
 - `{"combat_bonus": 8, "special_vs": "undead", "damage_multiplier": 2}` — Sommerswerd
@@ -721,6 +888,26 @@ def check_version(character, expected_version):
 ```
 
 Every state-mutating engine function increments `character.version` after applying changes. The API layer checks the version before applying, returning 409 on mismatch.
+
+## Transaction Boundaries
+
+Each state-mutating gameplay endpoint executes within a single database transaction. The sequence within the transaction is:
+
+```
+1. Load character (SELECT ... FOR UPDATE or equivalent)
+2. Check version (raise 409 VERSION_MISMATCH if mismatch)
+3. Run engine logic (phase resolution, combat, item changes, etc.)
+4. Write character state mutations
+5. Write character_events rows (including parent_event_id links)
+6. Increment character.version
+7. Commit
+```
+
+- **Decision**: Version check, state mutation, event logging, and version increment are all atomic within one transaction.
+- **Rationale**: A partial write (state changed but event not logged, or version not incremented) would leave the system in an inconsistent state that is difficult to detect and repair.
+- **Implications**: If any step fails, the entire transaction rolls back. The character remains at its pre-request state. The client may retry with the same version number. There are no partial-success states.
+
+Read endpoints (`GET /scene`, `GET /characters/{id}`, etc.) do not use transactions — they are read-only and always see committed state.
 
 ## Discipline Effects
 
@@ -1029,6 +1216,51 @@ def resolve_choice_triggered_random(choice_random_outcomes):
         if outcome.range_min <= number <= outcome.range_max:
             return outcome
     raise ValueError(f"No outcome band covers number {number}")
+```
+
+### Mixed Random + Regular Choice Handling
+
+Some scenes have a mix of random-gated choices and regular choices. These are handled entirely within the `choices` phase — no separate `random` phase is added to the sequence.
+
+- **Decision**: The `choices` phase handles both regular and random-gated choices together. The `random` phase is only used for `random_outcomes` table entries (phase-based effects) and for scenes where **all** exits are random-gated.
+- **Rationale**: Mixed scenes are fundamentally a presentation concern — the player sees all their options (regular choices and rollable choices) at once and picks one. There is no need for a dedicated phase.
+
+**Phase sequence logic:**
+
+```python
+def compute_phase_sequence(scene, scene_items, combat_encounters, choices):
+    phases = []
+    # ... (backpack_loss, item_loss, items, eat, combat phases as before) ...
+
+    # Random phase: ONLY if scene has random_outcomes entries (phase-based effects)
+    # OR if ALL choices are random-gated (scene-level random exit)
+    all_choices_random = choices and all(c.condition_type == 'random' for c in choices)
+    has_random_outcomes = bool(scene.random_outcomes)
+    if has_random_outcomes or all_choices_random:
+        phases.append({"type": "random"})
+
+    # Otherwise (mixed scene): choices phase handles random-gated + regular choices together.
+    # No separate random phase. Player selects a random-gated choice → /choose returns
+    # requires_roll: true → /roll resolves via choice_random_outcomes.
+
+    phases.append({"type": "heal"})
+    phases.append({"type": "choices"})
+    return phases
+```
+
+**Client flow for mixed scenes:**
+
+```
+GET /scene → phase: "choices", choices includes:
+  - Regular choice (available: true, has_random_outcomes: false)
+  - Random-gated choice (available: true, has_random_outcomes: true)
+  - Unavailable choice (available: false, condition: ...)
+
+Player selects the random-gated choice:
+POST /choose → { requires_roll: true, choice_id: 42, outcome_bands: [...] }
+
+Player rolls:
+POST /roll → resolves choice_random_outcomes, auto-transitions to target scene
 ```
 
 ## Character Creation

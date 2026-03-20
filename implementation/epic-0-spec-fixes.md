@@ -10,19 +10,19 @@ Documentation-only epic. No code. Applies approved but unapplied spec changes fr
 
 ## Story 0.1: Apply Approved Spec Bug Fixes
 
-**Status**: Not Started
+**Status**: Complete (2026-03-19)
 
 Apply the 7 approved fixes (todo items A–G) to their respective spec documents.
 
 ### Tasks
 
-- [ ] **A.** Fix `POST /characters` response example in api.md — change `total_steps: 3, step_index: 2` to `total_steps: 2, step_index: 0` per resolved 2-step wizard (todo #8)
-- [ ] **B.** Fix Laumspur amount in game-engine.md — change `amount: 2` to `amount: 4` (matches seed-data.md and source books)
-- [ ] **C.** Remove Gold Crowns from `pending_items` example in api.md — gold is auto-applied per todo #13 and should not appear as a pending item
-- [ ] **D.** Fix parser.md Load Phase numbering — step 7 is missing (jumps 6→8), renumber sequentially
-- [ ] **E.** Fix parser.md Load Phase step 2 — says `FK → books` for disciplines; should say "era-scoped, no book FK" per todo #9
-- [ ] **F.** Fix parser.md Load Phase step 11 — says `FK → books` for combat_results; should say "era-scoped" per todo #29
-- [ ] **G.** Rename `character_disciplines.weapon_type` → `weapon_category` in data-model.md to match `weapon_categories.category` and glossary usage
+- [x] **A.** Fix `POST /characters` response example in api.md — change `total_steps: 3, step_index: 2` to `total_steps: 2, step_index: 0` per resolved 2-step wizard (todo #8)
+- [x] **B.** Fix Laumspur amount in game-engine.md — change `amount: 2` to `amount: 4` (matches seed-data.md and source books)
+- [x] **C.** Remove Gold Crowns from `pending_items` example in api.md — gold is auto-applied per todo #13 and should not appear as a pending item
+- [x] **D.** Fix parser.md Load Phase numbering — step 7 is missing (jumps 6→8), renumber sequentially
+- [x] **E.** Fix parser.md Load Phase step 2 — says `FK → books` for disciplines; should say "era-scoped, no book FK" per todo #9
+- [x] **F.** Fix parser.md Load Phase step 11 — says `FK → books` for combat_results; should say "era-scoped" per todo #29
+- [x] **G.** Rename `character_disciplines.weapon_type` → `weapon_category` in data-model.md to match `weapon_categories.category` and glossary usage
 
 ### Acceptance Criteria
 
@@ -80,17 +80,17 @@ Apply ~25 resolved decisions from todo items 50–82 that haven't been written i
 
 ## Story 0.3: Compile Kai CRT Seed Data
 
-**Status**: Not Started
+**Status**: Complete
 
 Compile the full 130-row Kai Combat Results Table from Project Aon source material into seed-data.md. Required for combat engine testing and the static seed script.
 
 ### Tasks
 
-- [ ] Compile all 13 CR brackets × 10 random numbers = 130 rows
-- [ ] Use sentinel values: `combat_ratio_min = -999` for bracket 1 (CR ≤ −11), `combat_ratio_max = 999` for bracket 13 (CR ≥ +11)
-- [ ] Use `NULL` for instant kill (`k`) entries in `enemy_loss` and `hero_loss`
-- [ ] Verify data against known bracket/roll combinations from source material
-- [ ] Add as "Combat Results Table (Kai Era)" section in seed-data.md
+- [x] Compile all 13 CR brackets × 10 random numbers = 130 rows
+- [x] Use sentinel values: `combat_ratio_min = -999` for bracket 1 (CR ≤ −11), `combat_ratio_max = 999` for bracket 13 (CR ≥ +11)
+- [x] Use `NULL` for instant kill (`k`) entries in `enemy_loss` and `hero_loss`
+- [x] Verify data against known bracket/roll combinations from source material
+- [x] Add as "Combat Results Table (Kai Era)" section in seed-data.md
 
 ### CRT Bracket Ranges
 

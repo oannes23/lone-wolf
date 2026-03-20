@@ -6,7 +6,15 @@ REST API built with FastAPI. All endpoints return JSON. Auth uses JWT bearer tok
 
 ## Authentication
 
-**Token expiry**: Access token = 24 hours. Refresh token = 90 days (stateless JWT, no server storage). Refresh tokens cannot be individually revoked. Password change should include an `issued_at` check to invalidate all prior tokens.
+**Token expiry**: Access token = 24 hours. Refresh token = 7 days (stateless JWT, no server storage). Refresh tokens cannot be individually revoked — this is an accepted risk for MVP. Password change invalidates all prior tokens via `issued_at` check against `password_changed_at`.
+
+**Password policy**: Minimum 8 characters, maximum 128 characters. No complexity requirements beyond length.
+
+**JWT payload schemas**:
+- Player access token: `{"sub": <user_id>, "username": "<username>", "type": "access", "iat": <timestamp>, "exp": <timestamp>}`
+- Player refresh token: `{"sub": <user_id>, "username": "<username>", "type": "refresh", "iat": <timestamp>, "exp": <timestamp>}`
+- Admin access token: `{"sub": <admin_id>, "role": "admin", "iat": <timestamp>, "exp": <timestamp>}` — 8-hour expiry, no refresh token. Admins re-authenticate on expiry.
+- Roll token: `{"sub": <user_id>, "cs": <combat_skill_base>, "end": <endurance_base>, "book_id": <book_id>, "iat": <timestamp>, "exp": <timestamp>}` — 1-hour expiry.
 
 ### `POST /auth/register`
 
@@ -163,12 +171,14 @@ Finalize a character with a previously rolled stat set. Character is created in 
   "current_run": 1,
   "version": 1,
   "disciplines": ["Camouflage", "Sixth Sense", "Healing", "Mindblast", "Mind Over Matter"],
-  "active_wizard": { "type": "character_creation", "step": "equipment", "step_index": 2, "total_steps": 3 }
+  "active_wizard": { "type": "character_creation", "step": "equipment", "step_index": 0, "total_steps": 2 }
 }
 ```
 
 - Returns `400` if `roll_token` is expired or invalid.
 - Returns `400` if the user has reached their `max_characters` limit (default: 3).
+- Returns `400` if `book_id` is not Book 1. For MVP, new characters may only be created in Book 1.
+- If the selected `discipline_ids` includes Weaponskill, `weapon_skill_type` is required (free choice from the weapon category list — no random roll). If `weapon_skill_type` is provided but no Weaponskill discipline was selected, it is ignored.
 - Character enters the equipment wizard step automatically.
 
 #### `GET /characters/{character_id}/wizard`
@@ -400,8 +410,7 @@ Get the current scene with available actions.
   "choices": [...],
   "combat": null,
   "pending_items": [
-    { "id": 15, "item_name": "Sword", "item_type": "weapon", "quantity": 1, "is_mandatory": false },
-    { "id": 16, "item_name": "Gold Crowns", "item_type": "gold", "quantity": 12, "is_mandatory": false }
+    { "id": 15, "item_name": "Sword", "item_type": "weapon", "quantity": 1, "is_mandatory": false }
   ],
   "is_death": false,
   "is_victory": false,
@@ -620,7 +629,7 @@ Use a consumable item (Healing Potion, Laumspur, etc.). Available at any phase. 
 }
 ```
 
-Returns `400` if the item is not consumable (no `consumable: true` in properties) or if the character doesn't have the item. Logs an `item_consumed` character event.
+Returns `400` if the item is not consumable (no `consumable: true` in properties) or if the character doesn't have the item. Returns `400` (`ITEM_NOT_CONSUMABLE`) for non-consumable items. Returns `400` (`WRONG_PHASE`) if `scene_phase = 'combat'` — consumable usage is not permitted during an active combat encounter; items may be used before combat starts or after it ends. Logs an `item_consumed` character event.
 
 ### `POST /gameplay/{character_id}/roll`
 
@@ -771,9 +780,9 @@ Start the book advance wizard. Creates `character_wizard_progress` row and sets 
 // Response 201
 {
   "wizard_type": "book_advance",
-  "step": "discipline",
+  "step": "pick_disciplines",
   "step_index": 0,
-  "total_steps": 3,
+  "total_steps": 4,
   "book": { "id": 2, "title": "Fire on the Water" }
 }
 ```
@@ -785,12 +794,12 @@ Returns `400` if the character is not at a victory scene. Returns `409` if the c
 Returns the current wizard step. Single canonical path for both character creation and book advance wizards.
 
 ```json
-// Response 200 — Step 1: Discipline selection
+// Response 200 — Step 1: Discipline selection (pick_disciplines)
 {
   "wizard_type": "book_advance",
-  "step": "discipline",
+  "step": "pick_disciplines",
   "step_index": 0,
-  "total_steps": 3,
+  "total_steps": 4,
   "book": { "id": 2, "title": "Fire on the Water" },
   "available_disciplines": [
     { "id": 11, "name": "Tracking", "description": "..." }
@@ -798,12 +807,25 @@ Returns the current wizard step. Single canonical path for both character creati
   "disciplines_to_pick": 1
 }
 
-// Response 200 — Step 2: Inventory adjustment
+// Response 200 — Step 2: Equipment selection (pick_equipment)
 {
   "wizard_type": "book_advance",
-  "step": "inventory",
+  "step": "pick_equipment",
   "step_index": 1,
-  "total_steps": 3,
+  "total_steps": 4,
+  "available_equipment": [
+    { "item_name": "Sword", "item_type": "weapon", "category": "weapons" },
+    { "item_name": "Healing Potion", "item_type": "backpack", "category": "backpack" }
+  ],
+  "pick_limit": 2
+}
+
+// Response 200 — Step 3: Inventory adjustment (inventory_adjust)
+{
+  "wizard_type": "book_advance",
+  "step": "inventory_adjust",
+  "step_index": 2,
+  "total_steps": 4,
   "current_weapons": [{ "name": "Sword" }, { "name": "Axe" }],
   "max_weapons": 2,
   "current_backpack": ["Healing Potion"],
@@ -811,12 +833,12 @@ Returns the current wizard step. Single canonical path for both character creati
   "special_items_carrying": ["Map"]
 }
 
-// Response 200 — Step 3: Confirmation
+// Response 200 — Step 4: Confirmation (confirm)
 {
   "wizard_type": "book_advance",
   "step": "confirm",
-  "step_index": 2,
-  "total_steps": 3,
+  "step_index": 3,
+  "total_steps": 4,
   "summary": {
     "new_book": "Fire on the Water",
     "combat_skill": 14,
@@ -1060,9 +1082,34 @@ All errors follow a consistent shape:
 
 ```json
 {
-  "detail": "Character does not belong to authenticated user"
+  "detail": "Character does not belong to authenticated user",
+  "error_code": "CHARACTER_DEAD"
 }
 ```
+
+The `error_code` field is a machine-readable string. The frontend branches on `error_code` for logic and displays `detail` to the user.
+
+### Error Code Enum
+
+| error_code | HTTP Status | Meaning |
+|------------|-------------|---------|
+| `VERSION_MISMATCH` | 409 | Optimistic lock conflict — character version in request does not match current version |
+| `PENDING_ITEMS` | 409 | Items phase has unresolved pending items — must accept or decline before advancing |
+| `COMBAT_UNRESOLVED` | 409 | Active combat encounter must be completed or evaded before proceeding |
+| `WRONG_PHASE` | 409 | Action is not valid in the current scene phase |
+| `CHARACTER_DEAD` | 409 | Character is dead — only restart is available |
+| `WIZARD_ACTIVE` | 409 | Character has an active wizard — must complete it before taking this action |
+| `CHOICE_UNAVAILABLE` | 400 | Choice condition not met (discipline, item, or gold requirement not satisfied) |
+| `INVENTORY_FULL` | 400 | Cannot accept item — weapon or backpack slots are at capacity |
+| `OVER_CAPACITY` | 400 | Character is currently over weapon or backpack capacity — must drop items first |
+| `NOT_IN_COMBAT` | 400 | Combat action requested but character is not in a combat phase |
+| `ITEM_NOT_CONSUMABLE` | 400 | Item does not have `consumable: true` in its properties |
+| `PATH_UNAVAILABLE` | 400 | Choice has no resolved target scene — awaiting admin correction |
+| `MAX_CHARACTERS` | 400 | User has reached their maximum character limit |
+| `INVALID_ROLL_TOKEN` | 400 | Roll token is expired, malformed, or does not match the request |
+| `RATE_LIMITED` | 429 | Too many requests — rate limit exceeded on this endpoint |
+
+### HTTP Status Summary
 
 | Status | Meaning |
 |--------|---------|
@@ -1072,3 +1119,4 @@ All errors follow a consistent shape:
 | 404 | Resource not found |
 | 409 | Conflict (character is dead, combat not resolved, wizard step out of order, version mismatch) |
 | 422 | Validation error (Pydantic) |
+| 429 | Rate limit exceeded |
