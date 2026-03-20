@@ -38,6 +38,20 @@ REST API built with FastAPI. All endpoints return JSON. Auth uses JWT bearer tok
 { "access_token": "eyJ...", "token_type": "bearer" }
 ```
 
+### `POST /auth/change-password`
+
+Change the authenticated user's password. Invalidates all prior tokens.
+
+```json
+// Request
+{ "current_password": "s3cret", "new_password": "n3wS3cret!" }
+
+// Response 200
+{ "message": "Password changed. Please log in again." }
+```
+
+Returns `400` if `current_password` is incorrect. Sets `password_changed_at` on the user record. All tokens issued before `password_changed_at` are rejected on subsequent requests (via `issued_at` check).
+
 ### `GET /auth/me`
 
 Returns current user profile.
@@ -166,23 +180,29 @@ Get the current wizard step and available options. Works for both character crea
 {
   "wizard_type": "character_creation",
   "step": "equipment",
-  "step_index": 2,
-  "total_steps": 3,
-  "available_equipment": {
-    "weapons": [
-      { "item_name": "Sword", "item_type": "weapon" },
-      { "item_name": "Axe", "item_type": "weapon" },
-      { "item_name": "Mace", "item_type": "weapon" }
-    ],
-    "backpack": [
-      { "item_name": "Meal", "item_type": "meal" },
-      { "item_name": "Rope", "item_type": "backpack" },
-      { "item_name": "Healing Potion", "item_type": "backpack" }
-    ]
+  "step_index": 0,
+  "total_steps": 2,
+  "included_items": [
+    { "item_name": "Axe", "item_type": "weapon", "note": "fixed" },
+    { "item_name": "Map of Sommerlund", "item_type": "special", "note": "fixed" }
+  ],
+  "auto_applied": {
+    "gold": 7,
+    "gold_formula": "random 0-9",
+    "meals": 1
   },
-  "pick_limits": { "weapons": 1, "backpack": 8 }
+  "available_equipment": [
+    { "item_name": "Sword", "item_type": "weapon", "category": "weapons" },
+    { "item_name": "Broadsword", "item_type": "weapon", "category": "weapons" },
+    { "item_name": "Helmet", "item_type": "special", "category": "special" },
+    { "item_name": "Healing Potion", "item_type": "backpack", "category": "backpack" },
+    { "item_name": "Meal", "item_type": "meal", "category": "meals", "quantity": 2 }
+  ],
+  "pick_limit": 1
 }
 ```
+
+The player can freely change their selections before submitting. Re-submitting with different selections is allowed. Gold and meals are auto-applied (server-rolled gold shown for transparency). Fixed items are displayed as "included" but are not selectable. Item stat bonuses (e.g., Chainmail Waistcoat +4 END) are applied immediately when equipment is finalized — the confirm step shows correct stats.
 
 #### `POST /characters/{character_id}/wizard`
 
@@ -431,6 +451,8 @@ Get the current scene with available actions.
 
 The `text` field on choices uses `display_text` (the Haiku-rewritten, page-agnostic version). The `available` flag is computed by the game engine. All choices are returned including unavailable ones.
 
+Choices with `target_scene_id = null` and no `choice_random_outcomes` are shown with `available: false` and `condition: { "type": "path_unavailable" }`. These represent unresolved cross-references from the parser. Admin can fix via bug reports.
+
 ### `POST /gameplay/{character_id}/choose`
 
 Make a choice to navigate to another scene.
@@ -621,7 +643,23 @@ All three auto-apply effects immediately. `requires_confirm` is a **UI-only hint
   "outcome_text": "You find 12 Gold Crowns",
   "effect_type": "gold_change",
   "effect_applied": { "amount": 12 },
+  "current_roll_group": 0,
+  "rolls_remaining": 0,
   "phase_complete": true,
+  "requires_confirm": true,
+  "version": 6
+}
+
+// Response 200 — multi-roll scene (more rolls remaining)
+{
+  "random_type": "phase_effect",
+  "random_number": 3,
+  "outcome_text": "You lose 2 Gold Crowns",
+  "effect_type": "gold_change",
+  "effect_applied": { "amount": -2 },
+  "current_roll_group": 0,
+  "rolls_remaining": 1,
+  "phase_complete": false,
   "requires_confirm": true,
   "version": 6
 }
@@ -666,7 +704,9 @@ All three auto-apply effects immediately. `requires_confirm` is a **UI-only hint
 }
 ```
 
-For `scene_redirect` outcomes, remaining automatic phases (heal) complete before the redirect fires. The redirect replaces the choices phase.
+For `scene_redirect` outcomes, remaining automatic phases (heal) complete before the redirect fires. The redirect replaces the choices phase. In multi-roll scenes, a `scene_redirect` in any roll group skips remaining roll groups (redirect wins).
+
+`current_roll_group` and `rolls_remaining` are included in phase-based random responses to support multi-roll scenes (`roll_group` on `random_outcomes`). The player calls `/roll` once per group.
 
 Returns `409` if not in the `random` phase and no pending choice-triggered roll.
 

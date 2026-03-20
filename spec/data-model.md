@@ -284,6 +284,7 @@ Available equipment for character creation per book. Drives the equipment wizard
 | `email` | `String(255)` UNIQUE | |
 | `password_hash` | `String(255)` | bcrypt |
 | `max_characters` | `Integer` | Maximum characters this user can create. Default: 3. Configurable by admin. |
+| `password_changed_at` | `DateTime` NULLABLE | Set on password change. Tokens with `issued_at` before this value are rejected. |
 | `created_at` | `DateTime` | |
 
 ### `characters`
@@ -304,7 +305,7 @@ Available equipment for character creation per book. Drives the equipment wizard
 | `endurance_max` | `Integer` | Maximum END (base + permanent bonuses like lore-circles). Healing caps at this value. |
 | `endurance_current` | `Integer` | Current END |
 | `gold` | `Integer` | 0–50. On pickup, partial acceptance up to cap (auto-applied). |
-| `meals` | `Integer` | Meal count. Sole source of truth for meals — meals are NOT tracked as character_items. Do not count against backpack limit. |
+| `meals` | `Integer` | Meal count. 0–8 (capped at 8). On pickup, partial acceptance up to cap. Sole source of truth for meals — meals are NOT tracked as character_items. Do not count against backpack limit. |
 | `is_alive` | `Boolean` | |
 | `is_deleted` | `Boolean` | Soft delete flag. |
 | `deleted_at` | `DateTime` NULLABLE | When the character was soft-deleted |
@@ -429,7 +430,7 @@ Classification of each `characters` column by ops.md field layer:
 | `endurance_max` | Status | Computed from endurance_base + lore-circle bonuses |
 | `endurance_current` | Meter | Bounded [0, endurance_max]. Underflow = death |
 | `gold` | Meter | Bounded [0, 50]. Overflow = partial acceptance |
-| `meals` | Meter | Bounded [0, ?]. No upper bound yet |
+| `meals` | Meter | Bounded [0, 8]. Overflow = partial acceptance |
 | `is_alive` | Status | Derived from endurance_current reaching 0 |
 | `current_scene_id` | Ref | Current position |
 | `active_combat_encounter_id` | Ref | Current combat |

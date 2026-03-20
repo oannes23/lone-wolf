@@ -67,24 +67,24 @@ Note: Rolls 5 and 7 both give Sword. This means Sword is twice as likely as othe
 - Axe (weapon)
 - Map of Sommerlund (special item)
 
-**Random bonus item (roll 0-9, pick 1):**
+**Choose 1:**
 
-| Roll | item_name | item_type | category | notes |
-|------|-----------|-----------|----------|-------|
-| 0 | Broadsword | weapon | weapons | |
-| 1 | Sword | weapon | weapons | |
-| 2 | Helmet | special | special | +2 END bonus |
-| 3 | Meal | meal | meals | qty: 2 |
-| 4 | Chainmail Waistcoat | special | special | +4 END bonus |
-| 5 | Mace | weapon | weapons | |
-| 6 | Healing Potion | backpack | backpack | restores 4 END |
-| 7 | Quarterstaff | weapon | weapons | |
-| 8 | Spear | weapon | weapons | |
-| 9 | Gold Crowns | gold | gold | qty: 12 |
+| item_name | item_type | category | notes |
+|-----------|-----------|----------|-------|
+| Broadsword | weapon | weapons | |
+| Sword | weapon | weapons | |
+| Helmet | special | special | +2 END bonus |
+| Meal | meal | meals | qty: 2 |
+| Chainmail Waistcoat | special | special | +4 END bonus |
+| Mace | weapon | weapons | |
+| Healing Potion | backpack | backpack | restores 4 END |
+| Quarterstaff | weapon | weapons | |
+| Spear | weapon | weapons | |
+| Gold Crowns | gold | gold | qty: 12 |
 
-**Gold:** Random 0-9 gold crowns (separate from equipment roll)
-**Meals:** 1 meal (fixed)
-**Equipment picks:** 1 (free choice from the list above, same as other books — the random-roll mechanic from the physical book is replaced with free choice for consistency)
+**Gold:** Random 0-9 gold crowns (auto-applied during equipment step)
+**Meals:** 1 meal (fixed, auto-applied during equipment step)
+**Equipment picks:** 1
 
 ### Book 2: Fire on the Water
 
@@ -232,9 +232,13 @@ Pre-wizard step (dedicated endpoint):
 
 ### Equipment Wizard Notes
 
-**All books use free choice**: The physical Book 1's random-roll equipment mechanic is replaced with free choice for consistency. All books present a pick-from-list with `max_picks_in_category` limits.
+**All books use free choice**: All books present a pick-from-list with `max_picks_in_category` limits.
 
 **Gold during equipment**: Each book adds random gold (0-9 for Book 1, 0-9 + 10 for books 2-5). This is rolled server-side during the equipment step and auto-applied.
+
+**Meals during equipment**: Fixed meals per book are auto-applied during the equipment step (e.g., Book 1 gives 1 meal).
+
+**Fixed items**: Auto-granted and shown in the equipment wizard UI as "included" (not selectable). Player sees them alongside chooseable items.
 
 ### Special Item Stat Bonuses
 

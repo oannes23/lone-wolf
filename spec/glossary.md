@@ -22,7 +22,7 @@ Canonical terminology for the Lone Wolf CYOA project.
 | **Evasion** | Some combat encounters allow the character to flee after N rounds, redirecting to a different scene. Evasion damage is configurable per encounter (default 0). |
 | **Special item** | An item that cannot be voluntarily dropped and doesn't count toward backpack limits. Often story-critical. |
 | **Gold Crowns** | Currency. Carried in belt pouch. Maximum 50. On pickup, partial acceptance up to cap (auto-applied). |
-| **Meal** | Tracked as an integer counter on the character (not as inventory items). The Hunting discipline negates meal requirements. Meals do not count against the backpack limit. |
+| **Meal** | Tracked as an integer counter on the character (not as inventory items). Maximum 8 (matches backpack capacity thematically). On pickup, partial acceptance up to cap. The Hunting discipline negates meal requirements. Meals do not count against the backpack limit. |
 | **Game Object** | Any entity in the game world tracked by the taxonomy system. Game objects have a Kind, canonical name, optional aliases, and kind-specific properties. All world entities, items, foes, and scenes are game objects. Stored in the `game_objects` table. |
 | **Kind** | A game object's type classification: `character`, `location`, `creature`, `organization`, `item`, `foe`, or `scene`. Determines what properties are expected and how the object participates in gameplay. |
 | **Tagged Ref** | A typed, directed link between two game objects stored in the `game_object_refs` table. Uses a JSON tags array to encode relationship category and type (e.g., `["appearance", "combatant"]`, `["spatial", "located_in"]`). Replaces separate appearances and relationships tables. |

@@ -20,7 +20,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 | [api.md](api.md) | 🟢 Specced | REST API design — auth, gameplay, admin, game objects, leaderboards |
 | [game-engine.md](game-engine.md) | 🟢 Specced | Pure game logic — combat, disciplines, inventory, transitions |
 | [parser.md](parser.md) | 🟢 Specced | XHTML extraction pipeline with LLM text rewriting |
-| [todo.md](todo.md) | 🟢 Resolved | Pre-implementation review findings — all 29 items resolved |
+| [todo.md](todo.md) | 🟢 Resolved | Pre-implementation review findings — 49 items total (29 original + 14 spec completion + 8 deferred post-MVP) |
 | [seed-data.md](seed-data.md) | 🟢 Specced | Kai-era seed data — weapon categories, starting equipment, transition rules, wizard templates |
 
 ## Key Architectural Decisions
@@ -47,7 +47,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Backpack loss**: `loses_backpack` flag on scenes triggers bulk removal of all backpack items and meals.
 - **OR conditions**: `condition_value` supports JSON for compound conditions (e.g., `{"any": ["Tracking", "Huntmastery"]}`).
 - **Evasion damage**: Per-encounter `evasion_damage` column on `combat_encounters` (default 0).
-- **Meals as counter**: Meals tracked as integer counter on characters, not as inventory items. Do not count against backpack limit.
+- **Meals as counter**: Meals tracked as integer counter on characters, not as inventory items. Maximum 8. On pickup, partial acceptance up to cap. Do not count against backpack limit.
 - **Foes as game objects**: Each unique enemy is a game_object (kind='foe'). `combat_encounters` references via `foe_game_object_id`. Enemy stats are also inline on the encounter for gameplay (denormalized).
 - **Roll token**: JWT signed with app secret, 1-hour expiry. Unlimited rerolls. Character limit: configurable per user, default 3.
 - **All eras**: Full support for Kai, Magnakai, Grand Master, and New Order (books 1–28+).
@@ -64,7 +64,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Eat phase is automatic**: Meal consumption is auto-applied during phase progression (no player action). The scene response includes `phase_results` reporting what happened. No dedicated eat endpoint.
 - **Heal phase always included**: The heal phase is always added to the phase sequence. At runtime, `should_heal` checks whether combat actually occurred (including conditional combats that were skipped).
 - **Scene redirect queueing**: When a `random_outcome` has `effect_type='scene_redirect'`, remaining automatic phases (heal) still complete first. The redirect fires in place of the choices phase.
-- **Advance wizard lazy init**: `GET /gameplay/{id}/wizard` at a victory scene with no active wizard auto-creates the advance wizard.
+- **Advance wizard explicit init**: `POST /gameplay/{id}/advance` required to start book advance wizard. No lazy-init. Replay available until player commits.
 - **Conditional combat**: `combat_encounters` has `condition_type`/`condition_value` — combat is skipped if the character has the specified discipline/item.
 - **Discipline stacking**: Configurable per character via `rule_overrides` JSON. Default: stack all tiers. Alternative: highest tier only.
 - **Healing + evasion**: Evasion counts as combat — no healing in scenes where combat was evaded.
@@ -102,19 +102,18 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Multi-roll scenes**: `roll_group` column on `random_outcomes` supports multiple sequential rolls per scene. See data-model.md.
 - **Admin content creation**: `POST /admin/{resource}` for all content resources. Sets `source='manual'`. See api.md Admin API.
 - **Event seq generation**: Application-level `MAX(seq)+1` within transaction. Safe via optimistic locking. See data-model.md character_events.
+- **Meal cap**: Meals capped at 8 (matches backpack capacity thematically). Overflow handled like gold — partial acceptance up to cap.
+- **Book 1 equipment**: All books use free choice for equipment selection. No random-roll variant.
+- **Equipment wizard**: Gold roll + fixed meals auto-applied during equipment step. Fixed items (e.g., Axe, Map) shown as "included" (not selectable). Player can freely re-pick before submitting. Item stat bonuses applied immediately.
+- **Multi-roll scenes**: Player calls `/roll` once per roll group. Response includes `rolls_remaining` and `current_roll_group`. Scene redirect in any group skips remaining groups (redirect wins).
+- **Password change**: `POST /auth/change-password` endpoint. Sets `password_changed_at`; all prior tokens rejected via `issued_at` check.
+- **Unresolved choices**: Choices with null `target_scene_id` (no random outcomes) shown as `available: false` with `path_unavailable` reason.
+- **Character names**: No uniqueness constraint. Duplicates allowed.
+- **Parser phase detection**: Best-effort auto-detection of non-standard phase ordering from narrative text position. Admin overrides via `phase_sequence_override`.
 
 ## Open Questions
 
-- Grand Master and New Order discipline mechanical effects need detailed research from the source books
-- SVG flow diagrams from `all-books-svg.zip` — potentially useful for admin validation views
-- Lore-circle bonus application timing and stacking rules for later eras (Grand Master lore-circles still TODO)
-- Meals upper bound — should there be a max? Books don't specify one. Needs source research.
-- Knowledge graph fog-of-war — should browsing be limited to entities the player has encountered? Post-MVP feature idea.
-- Run comparison API — `GET /characters/{id}/runs/compare` for side-by-side run stats. Future enhancement.
-- Game object taxonomy: tuning LLM entity extraction prompts for accuracy and dedup quality across 28+ books
-- Game object taxonomy: how the entity catalog scales with context window when processing later books (filtering strategies)
-- Parser logic for detecting non-standard phase ordering (items after combat, etc.) from narrative text position
-- Mandatory items identification: deferred to post-parse admin workflow. Parser seeds all as `is_mandatory=false`, admin corrects via bug reports.
+See [todo.md](todo.md) items 42-49 for deferred post-MVP questions. All remaining open questions are non-blocking for Kai-era (books 1-5) implementation.
 
 ## Resolved Questions
 
@@ -179,7 +178,19 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - ~~Event seq generation~~ → Application-level `MAX(seq)+1` within transaction.
 - ~~Mindshield Kai-era effect~~ → Enemy Mindblast occurs in books 3-5 (Helghast, Darklord servants). Mindshield is not a trap pick.
 - ~~Weapon categories~~ → 11 weapons across 7 categories for Kai era. Warhammer is its own category. See seed-data.md.
-- ~~Starting equipment~~ → Full equipment lists compiled for all 5 Kai books. Book 1 uses random roll; books 2-5 use free choice with varying pick limits. See seed-data.md.
+- ~~Starting equipment~~ → Full equipment lists compiled for all 5 Kai books. All books use free choice with varying pick limits. See seed-data.md.
 - ~~Book transition rules~~ → 4 uniform Kai-to-Kai rows. Keep everything, pick 1 new discipline, +10+random gold. See seed-data.md.
-- ~~Wizard template seed data~~ → character_creation: 2 steps. book_advance: 3 steps. Book 1 equipment step is roll-based. See seed-data.md.
+- ~~Wizard template seed data~~ → character_creation: 2 steps. book_advance: 3 steps. All books use free choice for equipment. See seed-data.md.
 - ~~Mandatory items~~ → Deferred to post-parse admin workflow. Parser seeds all as is_mandatory=false.
+- ~~Meals upper bound~~ → Capped at 8 (backpack capacity). Overflow = partial acceptance.
+- ~~Book 1 equipment mechanic~~ → Free choice for all books. No random-roll variant.
+- ~~Starting gold/meals~~ → Auto-applied during equipment wizard step. Gold server-rolled, meals fixed per book.
+- ~~Multi-roll API~~ → Repeated `/roll` calls per group. `rolls_remaining` + `current_roll_group` in response. Redirect wins mid-sequence.
+- ~~Password change~~ → `POST /auth/change-password`. `password_changed_at` column on users for token invalidation.
+- ~~Null target_scene_id~~ → Show choice as unavailable with `path_unavailable` condition.
+- ~~Character name uniqueness~~ → No constraint. Duplicates allowed.
+- ~~Equipment wizard re-pick~~ → Freely change selections before submitting.
+- ~~Parser phase detection~~ → Best-effort auto-detect. Admin overrides via `phase_sequence_override`.
+- ~~Item bonuses during wizard~~ → Immediate recalculation. Confirm step shows correct stats.
+- ~~Fixed equipment in wizard~~ → Auto-granted, shown as "included" (not selectable).
+- ~~Scene redirect mid-roll~~ → Redirect wins. Remaining roll groups skipped. Heal still completes before redirect fires.

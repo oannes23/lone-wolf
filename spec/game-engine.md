@@ -375,6 +375,8 @@ def check_single_condition(character, condition_type, value):
 
 All choices are returned to the client, including unavailable ones (with `available: false` and the condition displayed), so the player can see what they're missing.
 
+**Unresolved choices**: Choices with `target_scene_id = null` and no `choice_random_outcomes` are shown with `available: false` and `condition_type = "path_unavailable"`. These represent unresolved cross-references from the parser that need admin correction.
+
 ### Death Scenes
 
 Scenes with `is_death = true` end the adventure **immediately on entry**. The entire phase sequence is skipped — no items, eat, combat, or heal phases run. The character is marked `is_alive = false`. A `death` action is logged in both the decision log and the character events table. The narrative is shown to the player, but the only available action is restart.
@@ -897,7 +899,7 @@ Endurance, gold, and meals are **meters** — bounded numeric fields with define
 |-------|-----|-----|-------------------|-------------------|
 | `endurance_current` | 0 | `endurance_max` | Death trigger fires | Capped at max (healing) |
 | `gold` | 0 | 50 | Cannot go below 0 | Partial acceptance up to cap |
-| `meals` | 0 | ?(no upper bound yet) | 3 END penalty (starvation) | No cap currently |
+| `meals` | 0 | 8 | 3 END penalty (starvation) | Partial acceptance up to cap |
 
 ### Centralized Endurance Function
 
@@ -975,12 +977,21 @@ Used when a scene instructs the player to "pick a number from the Random Number 
 - **Scene redirect**: When `effect_type='scene_redirect'`, remaining automatic phases (heal) complete first. The redirect then fires in place of the choices phase.
 
 ```python
-def resolve_random_phase(scene_id, random_outcomes):
+def resolve_random_phase(scene_id, random_outcomes, current_roll_group):
+    """Resolve one roll group. Called once per /roll request.
+    Returns result with rolls_remaining count.
+    If effect is scene_redirect, remaining groups are skipped (redirect wins).
+    """
+    group_outcomes = [o for o in random_outcomes if o.roll_group == current_roll_group]
     number = random.randint(0, 9)
-    for outcome in random_outcomes:
+    for outcome in group_outcomes:
         if outcome.range_min <= number <= outcome.range_max:
-            return apply_random_effect(outcome, number)
-    raise ValueError(f"No outcome band covers number {number}")
+            max_group = max(o.roll_group for o in random_outcomes)
+            rolls_remaining = max_group - current_roll_group
+            if outcome.effect_type == 'scene_redirect':
+                rolls_remaining = 0  # redirect wins, skip remaining groups
+            return apply_random_effect(outcome, number), rolls_remaining
+    raise ValueError(f"No outcome band covers number {number} in group {current_roll_group}")
 ```
 
 ### 2. Scene-Level Random Exits (No Player Choice)
