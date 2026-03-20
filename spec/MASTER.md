@@ -20,6 +20,8 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 | [api.md](api.md) | 🟢 Specced | REST API design — auth, gameplay, admin, game objects, leaderboards |
 | [game-engine.md](game-engine.md) | 🟢 Specced | Pure game logic — combat, disciplines, inventory, transitions |
 | [parser.md](parser.md) | 🟢 Specced | XHTML extraction pipeline with LLM text rewriting |
+| [todo.md](todo.md) | 🟢 Resolved | Pre-implementation review findings — all 29 items resolved |
+| [seed-data.md](seed-data.md) | 🟢 Specced | Kai-era seed data — weapon categories, starting equipment, transition rules, wizard templates |
 
 ## Key Architectural Decisions
 
@@ -78,19 +80,41 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 
 - **Roll auto-applies**: The `/roll` endpoint applies effects immediately. `requires_confirm` is a UI-only hint — the client shows the result and the player clicks confirm in the UI to proceed, but no server call is needed for the confirm itself.
 - **Choice-triggered random data model**: New `choice_random_outcomes` table stores outcome bands per choice. Parent choice has `target_scene_id = null`. `/choose` returns `requires_roll: true` with outcome bands. Player then calls `/roll`.
+- **Meter pattern**: Endurance, gold, and meals are ops.md Meters with centralized boundary logic. All endurance mutations route through `apply_endurance_delta()` — single place for the death check. See game-engine.md Meter Semantics.
+- **Operations layer**: `character_events.operations` JSON column records atomic ops.md operations (e.g., `meter.delta`, `ref.set`) alongside the semantic `event_type`. Dual-layer event design. See data-model.md character_events.
+- **Causality tracking**: `parent_event_id` FK on character_events enables event chains (e.g., meal_penalty → death). `seq` column provides strict per-character ordering independent of timestamps. See data-model.md character_events.
+- **Mandatory items**: `scene_items.is_mandatory` flag. When true, player cannot decline the item during the items phase — must accept (managing inventory if needed). See data-model.md scene_items.
+- **Version required**: `version` field is required (not optional) on all state-mutating gameplay endpoints. Omitting returns 422. See api.md Optimistic Locking.
+- **Redirect depth limit**: `MAX_REDIRECT_DEPTH = 5` prevents infinite redirect loops from misconfigured scene data. Follows ops.md cascade safety. See game-engine.md Meter Semantics.
+- **Phase results severity**: `severity` field (`info`, `warn`, `danger`) on phase_results guides UI presentation of automatic phase outcomes. See game-engine.md Phase Progression.
+- **Unarmed penalty**: -4 CS when no weapon equipped. Checked in `effective_combat_skill()`. See game-engine.md Combat Resolution.
+- **Enemy Mindblast**: Modeled via `combat_modifiers` rows with `modifier_type='enemy_mindblast'`. Hero suffers -2 CS unless they have Mindshield. See game-engine.md Combat Resolution.
+- **Consumable items**: `POST /gameplay/{id}/use-item` available at any phase. Effects data-driven via game_object `properties` JSON. See api.md and game-engine.md.
+- **Item combat bonuses**: Stored in item game_object `properties` JSON (`combat_bonus`, `special_vs`, `damage_multiplier`). `effective_combat_skill()` checks equipped weapon properties. See game-engine.md.
+- **Gold deduction on choose**: Gold-gated choices auto-deduct `int(condition_value)` gold on selection. See api.md and game-engine.md Scene Transition.
+- **Era-scoped disciplines and CRT**: `disciplines` and `combat_results` use `era` column instead of `book_id` FK. One set per era, shared by all books in that era. See data-model.md.
+- **Stateless refresh tokens**: JWT with 90-day expiry, no server storage. Password change invalidates via `issued_at` check. See api.md Authentication.
+- **Advance wizard explicit init**: `POST /gameplay/{id}/advance` required to start book advance wizard. No lazy-init. Replay available until player commits. See api.md Book Advance Wizard.
+- **Single wizard path**: `/characters/{id}/wizard` is the canonical path for both creation and advance wizards. No `/gameplay/` alias. See api.md.
+- **Auto-apply gold/meals**: Gold and meal `scene_items` are auto-applied during phase progression (no accept/decline). Only weapon/backpack/special items need explicit pickup. See game-engine.md Phase Progression.
+- **Mandatory items override limits**: Mandatory items bypass slot limits. Player gets the item even if over capacity. Next items phase forces resolution. See game-engine.md Inventory Constraints.
+- **Engine DTOs**: `CharacterState`, `SceneContext`, `CombatContext` dataclasses define the engine's input contract. API layer populates from DB. See game-engine.md.
+- **Multi-roll scenes**: `roll_group` column on `random_outcomes` supports multiple sequential rolls per scene. See data-model.md.
+- **Admin content creation**: `POST /admin/{resource}` for all content resources. Sets `source='manual'`. See api.md Admin API.
+- **Event seq generation**: Application-level `MAX(seq)+1` within transaction. Safe via optimistic locking. See data-model.md character_events.
 
 ## Open Questions
 
 - Grand Master and New Order discipline mechanical effects need detailed research from the source books
-- Exact book transition carry-over rules per book pair (to populate `book_transition_rules`)
 - SVG flow diagrams from `all-books-svg.zip` — potentially useful for admin validation views
 - Lore-circle bonus application timing and stacking rules for later eras (Grand Master lore-circles still TODO)
+- Meals upper bound — should there be a max? Books don't specify one. Needs source research.
+- Knowledge graph fog-of-war — should browsing be limited to entities the player has encountered? Post-MVP feature idea.
+- Run comparison API — `GET /characters/{id}/runs/compare` for side-by-side run stats. Future enhancement.
 - Game object taxonomy: tuning LLM entity extraction prompts for accuracy and dedup quality across 28+ books
 - Game object taxonomy: how the entity catalog scales with context window when processing later books (filtering strategies)
-- Seeding the `weapon_categories` table: need to compile the full list of weapon names across all 29 books
 - Parser logic for detecting non-standard phase ordering (items after combat, etc.) from narrative text position
-- Wizard template seed data: exact step sequences and configs for `character_creation` and `book_advance` wizards
-- `book_starting_equipment` data: equipment lists for each Kai-era book need compilation from source material
+- Mandatory items identification: deferred to post-parse admin workflow. Parser seeds all as `is_mandatory=false`, admin corrects via bug reports.
 
 ## Resolved Questions
 
@@ -101,7 +125,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - ~~Death scene phase handling~~ → Skip all phases immediately. Mark dead on entry. Narrative shown, no phases run.
 - ~~Eat phase interactivity~~ → Fully automatic. No `/eat` endpoint. Result reported in `phase_results` on scene response.
 - ~~Heal phase with conditional combat~~ → Always include heal phase. Runtime check via `should_heal` determines if combat actually occurred.
-- ~~Advance wizard initiation~~ → Lazy init: `GET /gameplay/{id}/wizard` at victory scene auto-creates the advance wizard.
+- ~~Advance wizard initiation~~ → Explicit init: `POST /gameplay/{id}/advance` required. No lazy-init on GET. Replay available until player commits.
 - ~~Scene redirect from random~~ → Remaining phases complete first. Redirect fires in place of choices phase.
 
 - ~~Healing discipline interaction with combat evasion~~ → Evasion counts as combat. No healing.
@@ -133,7 +157,29 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - ~~Items in taxonomy~~ → Kind system. Items are game_objects (kind='item').
 - ~~Starting scene~~ → Data-driven via `books.start_scene_number`.
 - ~~Social features~~ → Rich leaderboards (deaths, decisions, END, death scenes, discipline popularity, item usage).
-- ~~Event sourcing depth~~ → Log + mutable state for MVP.
+- ~~Event sourcing depth~~ → Log + mutable state for MVP. The `character_events.operations` JSON column serves as the migration seam — if full event-sourcing is adopted later, operations already record the atomic mutations needed for replay.
 - ~~Foe modeling~~ → Foes as game_objects (kind='foe'), `combat_encounters` references them.
 - ~~Section vs scene~~ → "Scene" terminology adopted everywhere.
 - ~~Wizard pattern~~ → Generic data-driven `wizard_templates` system. Character creation and book advance use the same infrastructure.
+- ~~Unarmed combat~~ → -4 CS penalty when no weapon equipped.
+- ~~Enemy Mindblast~~ → `combat_modifiers` with `modifier_type='enemy_mindblast'`. -2 CS unless hero has Mindshield.
+- ~~Consumable items~~ → `POST /gameplay/{id}/use-item`. Effects data-driven via game_object properties.
+- ~~Item combat bonuses~~ → Stored in item game_object `properties` JSON. `effective_combat_skill()` checks equipped weapon.
+- ~~Gold deduction~~ → Auto-deduct on `/choose` for gold-gated choices.
+- ~~Discipline scoping~~ → Era-scoped. `disciplines` uses `era` column, not `book_id` FK.
+- ~~CRT scoping~~ → Era-scoped. `combat_results` uses `era` column, not `book_id` FK.
+- ~~Refresh tokens~~ → Stateless JWT, no server storage, 90-day expiry.
+- ~~Wizard endpoint path~~ → Single canonical path: `/characters/{id}/wizard`.
+- ~~Wizard template seed data~~ → `character_creation`: 2 steps (pick_equipment, confirm). `book_advance`: 3 steps (pick_disciplines, inventory_adjust, confirm).
+- ~~Gold/meal pickup~~ → Auto-applied during phase progression. No accept/decline needed.
+- ~~Mandatory item deadlock~~ → Mandatory items override slot limits. Next items phase forces resolution.
+- ~~Engine purity~~ → DTOs (`CharacterState`, `SceneContext`, `CombatContext`) define engine input contract.
+- ~~Multi-roll scenes~~ → `roll_group` column on `random_outcomes`.
+- ~~Admin content creation~~ → `POST /admin/{resource}` for all resources.
+- ~~Event seq generation~~ → Application-level `MAX(seq)+1` within transaction.
+- ~~Mindshield Kai-era effect~~ → Enemy Mindblast occurs in books 3-5 (Helghast, Darklord servants). Mindshield is not a trap pick.
+- ~~Weapon categories~~ → 11 weapons across 7 categories for Kai era. Warhammer is its own category. See seed-data.md.
+- ~~Starting equipment~~ → Full equipment lists compiled for all 5 Kai books. Book 1 uses random roll; books 2-5 use free choice with varying pick limits. See seed-data.md.
+- ~~Book transition rules~~ → 4 uniform Kai-to-Kai rows. Keep everything, pick 1 new discipline, +10+random gold. See seed-data.md.
+- ~~Wizard template seed data~~ → character_creation: 2 steps. book_advance: 3 steps. Book 1 equipment step is roll-based. See seed-data.md.
+- ~~Mandatory items~~ → Deferred to post-parse admin workflow. Parser seeds all as is_mandatory=false.

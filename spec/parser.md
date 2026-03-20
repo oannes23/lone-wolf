@@ -445,7 +445,7 @@ def upsert_with_source(table, key_columns, data):
         insert(data, source='auto')
 ```
 
-Tables with `source` column: `scenes`, `choices`, `combat_encounters`, `scene_items`, `random_outcomes`, `game_objects`, `game_object_refs`.
+Tables with `source` column: `scenes`, `choices`, `combat_encounters`, `combat_modifiers`, `scene_items`, `random_outcomes`, `choice_random_outcomes`, `game_objects`, `game_object_refs`.
 
 ## CLI Interface
 

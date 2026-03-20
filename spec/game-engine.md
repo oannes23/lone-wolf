@@ -2,6 +2,68 @@
 
 Pure functions with no HTTP or database dependencies. All engine functions take data objects (dataclasses or Pydantic models) as input and return results — the routers handle persistence.
 
+## Engine Input Contracts (DTOs)
+
+The API layer populates these dataclasses from the database. Engine functions accept only these types — never ORM models or raw DB rows.
+
+```python
+@dataclass
+class CharacterState:
+    """Snapshot of character state for engine functions."""
+    id: int
+    combat_skill_base: int
+    endurance_base: int
+    endurance_max: int
+    endurance_current: int
+    gold: int
+    meals: int
+    is_alive: bool
+    version: int
+    disciplines: list[str]          # discipline names
+    items: list[ItemState]          # current inventory
+    equipped_weapon: ItemState | None
+    rule_overrides: dict | None
+
+@dataclass
+class ItemState:
+    """An item in the character's inventory."""
+    name: str
+    item_type: str                  # weapon, backpack, special
+    is_equipped: bool
+    game_object_id: int | None
+    properties: dict                # from game_object.properties JSON (combat_bonus, consumable, etc.)
+
+@dataclass
+class SceneContext:
+    """All scene data needed for phase progression."""
+    id: int
+    number: int
+    book_id: int
+    is_death: bool
+    is_victory: bool
+    must_eat: bool
+    loses_backpack: bool
+    phase_sequence_override: list[dict] | None
+    scene_items: list             # scene_items rows
+    combat_encounters: list       # combat_encounters rows with modifiers
+    random_outcomes: list         # random_outcomes rows
+    choices: list                 # choices rows
+
+@dataclass
+class CombatContext:
+    """Data needed for a single combat round."""
+    encounter_id: int
+    enemy_name: str
+    enemy_cs: int
+    enemy_end_remaining: int
+    mindblast_immune: bool
+    modifiers: list               # combat_modifiers rows
+    evasion_after_rounds: int | None
+    evasion_target: int | None
+    evasion_damage: int
+    rounds_fought: int
+```
+
 ## Combat Resolution
 
 ### Combat Ratio
@@ -13,8 +75,15 @@ combat_ratio = hero_effective_cs - enemy_cs
 Where `hero_effective_cs` includes all modifiers:
 
 ```python
-def effective_combat_skill(base_cs, disciplines, equipped_weapon, enemy, use_psi_surge=False):
+def effective_combat_skill(base_cs, disciplines, equipped_weapon, carried_items, enemy, use_psi_surge=False):
     cs = base_cs
+    # Unarmed penalty: -4 CS if no weapon equipped
+    if equipped_weapon is None:
+        cs -= 4
+    # Enemy Mindblast: -2 CS if enemy has mindblast modifier and hero lacks Mindshield
+    if has_combat_modifier(enemy, 'enemy_mindblast') and not has_discipline("Mindshield"):
+        cs -= 2
+    # Hero Mindblast: +2 CS (unless enemy immune)
     if has_discipline("Mindblast") and not enemy.mindblast_immune:
         cs += 2  # Kai
     if has_discipline("Psi-surge") and use_psi_surge and not enemy.mindblast_immune:
@@ -25,6 +94,13 @@ def effective_combat_skill(base_cs, disciplines, equipped_weapon, enemy, use_psi
         cs += 3  # Magnakai: +3 (replaces Weaponskill, category match)
     if has_discipline("Kai-surge"):
         cs += 8  # Grand Master (replaces Psi-surge, with END cost)
+    # Item-granted combat bonuses (e.g., Sommerswerd +8 CS)
+    if equipped_weapon and equipped_weapon.properties.get("combat_bonus"):
+        cs += equipped_weapon.properties["combat_bonus"]
+    # Special item combat bonuses (e.g., Shield +2 CS, Silver Helm +2 CS)
+    for item in carried_items:
+        if item.item_type == "special" and item.properties.get("combat_bonus"):
+            cs += item.properties["combat_bonus"]
     # Lore-circle bonuses
     cs += lore_circle_cs_bonus(disciplines)
     # Encounter-specific modifiers applied last
@@ -223,11 +299,19 @@ The character's position in the phase sequence is tracked by `scene_phase` and `
 
 **Automatic phase results**: Since `eat` and `heal` (and `item_loss`, `backpack_loss`) are automatic, their results are reported in the `phase_results` array on the scene response. The client never sees `scene_phase = "eat"` — by the time it reads the scene, automatic phases have already resolved.
 
+**Phase result severity**: Each entry in `phase_results` includes a `severity` field to guide UI presentation:
+
+| Severity | Meaning | Examples |
+|----------|---------|----------|
+| `info` | Neutral or positive outcome | `meal_consumed`, `hunting_used`, `healed`, `item_loss_skip`, `backpack_loss` (no items) |
+| `warn` | Notable negative outcome, not critical | `meal_penalty` (still alive), `item_loss` |
+| `danger` | Critical outcome | `death` (from any cause), `meal_penalty` when endurance ≤ 3 |
+
 Each phase completion logs a `character_event` with the phase type and details.
 
 #### Blocking Rules
 
-- **Items phase**: Player must accept or decline EVERY pending item before advancing. API returns `409` if player attempts to choose or advance with unresolved items. Player CAN use the inventory endpoint (drop/equip/unequip) during this phase to make room for new items.
+- **Items phase**: Gold and meal `scene_items` with `action='gain'` are auto-applied during phase progression (no accept/decline needed; reported in `phase_results`). For weapon/backpack/special items, the player must accept or decline each one before advancing. Mandatory items (`is_mandatory=true`) override slot limits — the player gets the item even if over capacity; the next items phase forces resolution back to within limits. API returns `409` if player attempts to choose or advance with unresolved items. Player CAN use the inventory endpoint (drop/equip/unequip) during this phase to make room for new items.
 - **Combat phase**: Player must complete combat (win, loss, or evade) before advancing. `active_combat_encounter_id` is set on the character.
 - **Random phase**: Player must click to roll before advancing.
 - **Choices phase**: Player selects a choice, which triggers transition to the next scene.
@@ -238,12 +322,13 @@ Each phase completion logs a `character_event` with the phase type and details.
 1. Player at scene S in 'choices' phase
 2. Filter choices by availability (see below)
 3. Player selects choice Ci → target scene T
-4. Log decision (character_id, S, T, Ci, run_number)
-5. Move character to scene T
-6. Compute phase sequence for T
-7. Begin phase progression for T
-8. Increment character.version
-9. Return new scene state (with current phase info)
+4. If choice has condition_type='gold': deduct int(condition_value) gold, log gold_change event
+5. Log decision (character_id, S, T, Ci, run_number)
+6. Move character to scene T
+7. Compute phase sequence for T
+8. Begin phase progression for T
+9. Increment character.version
+10. Return new scene state (with current phase info)
 ```
 
 ### Choice Filtering
@@ -343,13 +428,16 @@ def restart_character(character, snapshot):
 
 Endurance is tracked with three values:
 - `endurance_base`: The rolled base value (e.g., 20 + random). Set at character creation, may change on era transitions.
-- `endurance_max`: The effective maximum (base + permanent bonuses). Lore-circle bonuses increase this value. Healing caps here.
+- `endurance_max`: The effective maximum (base + permanent bonuses + item bonuses). Lore-circle bonuses and special item `endurance_bonus` properties increase this value. Healing caps here.
 - `endurance_current`: The current health. Can never exceed `endurance_max`.
 
 ```python
-def compute_endurance_max(endurance_base, disciplines):
+def compute_endurance_max(endurance_base, disciplines, carried_items):
     max_end = endurance_base
     max_end += lore_circle_end_bonus(disciplines)
+    # Special item endurance bonuses (Chainmail Waistcoat +4, Helmet +2, etc.)
+    for item in carried_items:
+        max_end += item.properties.get("endurance_bonus", 0)
     # Other permanent bonuses could add here
     return max_end
 ```
@@ -422,12 +510,14 @@ Both character creation and book advance use the same data-driven wizard infrast
 ### Wizard Flow
 
 ```
-1. Wizard is initiated (creation finalize or victory → advance)
+1. Wizard is initiated:
+   - Character creation: POST /characters auto-starts wizard after creating character
+   - Book advance: POST /gameplay/{id}/advance explicitly starts wizard (no lazy-init)
 2. character_wizard_progress row created, current_step_index = 0
 3. character.active_wizard_id set to the progress row
 4. For each step:
-   a. GET endpoint returns current step type, config, and available options
-   b. POST endpoint submits the step's choice
+   a. GET /characters/{id}/wizard returns current step type, config, and available options
+   b. POST /characters/{id}/wizard submits the step's choice
    c. Choice is validated and stored in progress.state JSON
    d. current_step_index incremented
 5. On final step (confirm): wizard completes
@@ -436,6 +526,29 @@ Both character creation and book advance use the same data-driven wizard infrast
    c. character.active_wizard_id cleared
    d. character_book_starts snapshot saved (for book advance)
 ```
+
+### Wizard Template Seed Data
+
+**`character_creation` template** (2 steps):
+
+| Step | step_type | config | API call |
+|------|-----------|--------|----------|
+| 0 | `pick_equipment` | `{"categories": ["weapons", "backpack"]}` | `POST /characters/{id}/wizard` |
+| 1 | `confirm` | `null` | `POST /characters/{id}/wizard` |
+
+Pre-wizard steps (dedicated endpoints, not wizard-managed):
+- Stat rolling: `POST /characters/roll` (repeatable, stateless)
+- Character creation + discipline/weapon skill selection: `POST /characters` (creates character, auto-starts wizard)
+
+**`book_advance` template** (3 steps):
+
+| Step | step_type | config | API call |
+|------|-----------|--------|----------|
+| 0 | `pick_disciplines` | `{"count": 1}` (from book_transition_rules.new_disciplines_count) | `POST /characters/{id}/wizard` |
+| 1 | `inventory_adjust` | `null` (limits from book_transition_rules) | `POST /characters/{id}/wizard` |
+| 2 | `confirm` | `null` | `POST /characters/{id}/wizard` |
+
+The advance wizard is started explicitly via `POST /gameplay/{id}/advance`. Until initiated, replay remains available at victory scenes.
 
 ### Wizard State
 
@@ -562,6 +675,35 @@ def apply_item_loss(character, item_name, item_type):
         return False  # skipped — log item_loss_skip event
 ```
 
+### Consumable Item Usage
+
+Consumable items (Healing Potions, Laumspur, etc.) can be used at any phase via `POST /gameplay/{id}/use-item`. Item effects are data-driven via game_object `properties` JSON.
+
+```python
+def use_consumable(character, item):
+    """Use a consumable item. Item must have consumable=true in properties."""
+    props = item.properties
+    if not props.get("consumable"):
+        raise InvalidAction("Item is not consumable")
+
+    effect = props.get("effect")
+    if effect == "endurance_restore":
+        amount = props.get("amount", 0)
+        apply_endurance_delta(character, amount)
+    # Future effects can be added here (cure_poison, etc.)
+
+    remove_item(character, item.name)
+    character.version += 1
+    return effect, amount
+```
+
+**Item properties for consumable items** (stored on game_object `properties` JSON):
+- `{"consumable": true, "effect": "endurance_restore", "amount": 4}` — Healing Potion
+- `{"consumable": true, "effect": "endurance_restore", "amount": 2}` — Laumspur
+
+**Item properties for special weapons** (stored on game_object `properties` JSON):
+- `{"combat_bonus": 8, "special_vs": "undead", "damage_multiplier": 2}` — Sommerswerd
+
 ## Optimistic Locking
 
 The `version` column on characters prevents concurrent modification (e.g., two browser tabs).
@@ -590,9 +732,9 @@ Every state-mutating engine function increments `character.version` after applyi
 | Hunting | No meal required when instructed to eat (uses `characters.meals` counter bypass) |
 | Sixth Sense | Unlocks discipline-gated choices |
 | Tracking | Unlocks discipline-gated choices |
-| Healing | +1 END on scene entry if no combat in scene (up to `endurance_max`). Applied after all other phases resolve. |
+| Healing | +1 END per scene if no combat occurred (up to `endurance_max`). Applied during heal phase. |
 | Weaponskill | +2 CS when equipped weapon's category matches chosen type (via `weapon_categories` table) |
-| Mindshield | Immune to enemy Mindblast attacks (no END loss) |
+| Mindshield | Immune to -2 CS penalty from enemy Mindblast. Modeled via `enemy_mindblast` combat_modifier. |
 | Mindblast | +2 CS in combat (unless enemy is immune) |
 | Animal Kinship | Unlocks discipline-gated choices |
 | Mind Over Matter | Unlocks discipline-gated choices |
@@ -712,14 +854,13 @@ def weapon_category_matches(equipped_weapon_name, skill_weapon_type):
     return category == skill_weapon_type
 ```
 
-Example categories:
+Kai-era weapon categories (from books 1-5). See seed-data.md for the full table.
 - **Sword**: Sword, Broadsword, Short Sword, Sommerswerd
-- **Axe**: Axe, Battle Axe, Hand Axe
-- **Mace**: Mace, War Hammer, Morning Star
-- **Spear**: Spear, Javelin, Lance
-- **Dagger**: Dagger, Throwing Knife
-- **Bow**: Bow, Longbow, Short Bow, Crossbow
-- **Quarterstaff**: Quarterstaff, Staff
+- **Axe**: Axe
+- **Mace**: Mace, Jewelled Mace
+- **Spear**: Spear, Magic Spear
+- **Dagger**: Dagger
+- **Quarterstaff**: Quarterstaff
 - **Warhammer**: Warhammer
 
 ## Meal Mechanics
@@ -739,10 +880,86 @@ def eat_meal(character):
         character.version += 1
         return 0  # no END loss
     else:
-        character.endurance_current -= 3
-        character.version += 1
-        return -3  # lost 3 END
+        apply_endurance_delta(character, -3)  # uses centralized meter function
+        return -3  # lost 3 END (death checked by apply_endurance_delta)
 ```
+
+- **Decision**: Starvation can kill. Death check after meal penalty.
+- **Rationale**: 3 END loss can reduce endurance to 0. Without a check, character continues at negative END. Aligns with ops.md Meter underflow pattern.
+
+## Meter Semantics
+
+Endurance, gold, and meals are **meters** — bounded numeric fields with defined boundary behavior. All meter mutations route through centralized functions that enforce bounds and fire triggers on boundary conditions.
+
+### Meter Definitions
+
+| Field | Min | Max | Underflow Behavior | Overflow Behavior |
+|-------|-----|-----|-------------------|-------------------|
+| `endurance_current` | 0 | `endurance_max` | Death trigger fires | Capped at max (healing) |
+| `gold` | 0 | 50 | Cannot go below 0 | Partial acceptance up to cap |
+| `meals` | 0 | ?(no upper bound yet) | 3 END penalty (starvation) | No cap currently |
+
+### Centralized Endurance Function
+
+All endurance mutations route through `apply_endurance_delta()`. This is the single place for the death check — combat damage, meal penalty, evasion damage, random effects, and any other source of endurance loss all call this function.
+
+```python
+def apply_endurance_delta(character, delta):
+    """Apply an endurance change with bounds enforcement and death trigger.
+
+    All endurance mutations (combat, starvation, healing, random effects)
+    route through this function. Single point for death check.
+    """
+    character.endurance_current += delta
+    if character.endurance_current > character.endurance_max:
+        character.endurance_current = character.endurance_max  # cap on heal
+    if character.endurance_current <= 0:
+        character.endurance_current = 0
+        character.is_alive = False  # death trigger
+    character.version += 1
+```
+
+- **Decision**: All endurance mutations go through one function.
+- **Rationale**: Without centralization, death checks are scattered across 4+ locations (combat, eat_meal, evasion, random effects). Missing any one creates a bug where characters survive at negative endurance. The `apply_endurance_delta` pattern follows ops.md Meter boundary enforcement (section 1.3).
+
+### Scene Redirect Depth Limit
+
+```python
+MAX_REDIRECT_DEPTH = 5
+```
+
+When a scene redirect triggers another redirect (e.g., random outcome → redirect → death scene), the engine tracks redirect depth and raises an error if `MAX_REDIRECT_DEPTH` is exceeded.
+
+- **Decision**: Hard limit of 5 chained redirects.
+- **Rationale**: Prevents infinite loops from misconfigured scene data. Follows ops.md cascade safety pattern (section 4.3). In practice, Lone Wolf books rarely chain more than 1-2 redirects.
+
+## Event Operations Mapping
+
+Each `character_events.event_type` decomposes into one or more ops.md operations recorded in the `operations` JSON column. Signal events (no state mutation) have null operations.
+
+| event_type | Operations | Notes |
+|------------|-----------|-------|
+| `item_pickup` | `[{"op": "ref.add", "field": "items", "value": "<item_name>"}]` | Adds item to inventory |
+| `item_decline` | _(null — signal event)_ | No state mutation |
+| `item_loss` | `[{"op": "ref.remove", "field": "items", "value": "<item_name>"}]` | Removes item |
+| `item_loss_skip` | _(null — signal event)_ | Character didn't have the item |
+| `meal_consumed` | `[{"op": "meter.delta", "field": "meals", "delta": -1}]` | |
+| `meal_penalty` | `[{"op": "meter.delta", "field": "endurance_current", "delta": -3}]` | May trigger death (child event) |
+| `gold_change` | `[{"op": "meter.delta", "field": "gold", "delta": <amount>}]` | Positive or negative |
+| `endurance_change` | `[{"op": "meter.delta", "field": "endurance_current", "delta": <amount>}]` | From random effects |
+| `healing` | `[{"op": "meter.delta", "field": "endurance_current", "delta": <amount>}]` | Capped at endurance_max |
+| `combat_start` | `[{"op": "ref.set", "field": "active_combat_encounter_id", "value": <id>}]` | |
+| `combat_end` | `[{"op": "ref.set", "field": "active_combat_encounter_id", "value": null}, {"op": "meter.delta", "field": "endurance_current", "delta": <total_loss>}]` | Includes cumulative combat damage |
+| `combat_skipped` | _(null — signal event)_ | Condition met, combat bypassed |
+| `evasion` | `[{"op": "ref.set", "field": "active_combat_encounter_id", "value": null}, {"op": "meter.delta", "field": "endurance_current", "delta": <evasion_damage>}]` | |
+| `death` | `[{"op": "object.update", "field": "is_alive", "value": false}]` | Always has `parent_event_id` pointing to cause |
+| `restart` | `[{"op": "object.update", "field": "is_alive", "value": true}, {"op": "meter.set", "field": "endurance_current", "value": <snapshot_value>}]` | Restores from snapshot |
+| `replay` | Same as restart | Without death_count increment |
+| `discipline_gained` | `[{"op": "ref.add", "field": "disciplines", "value": <discipline_id>}]` | |
+| `book_advance` | `[{"op": "ref.set", "field": "book_id", "value": <new_book_id>}]` | |
+| `random_roll` | Varies by effect | gold_change, endurance_change, item_gain, item_loss, scene_redirect |
+| `item_consumed` | `[{"op": "ref.remove", "field": "items", "value": "<item_name>"}, {"op": "meter.delta", "field": "endurance_current", "delta": <amount>}]` | Consumable item used |
+| `backpack_loss` | `[{"op": "ref.remove", "field": "backpack_items", "value": "<all>"}, {"op": "meter.set", "field": "meals", "value": 0}]` | Bulk removal |
 
 ## Random Number Mechanics
 

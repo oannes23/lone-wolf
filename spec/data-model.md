@@ -95,35 +95,36 @@ Distinct from `random_outcomes` (phase-based random effects) and from choices wi
 
 ### `combat_results`
 
-The standard Combat Results Table — same across all Kai-era books.
+The standard Combat Results Table — era-scoped (same CRT shared by all books in an era).
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `book_id` | `Integer` FK → `books.id` | |
+| `era` | `String(20)` | `kai`, `magnakai`, `grand_master`, `new_order`. One CRT per era, shared by all books in that era. |
 | `random_number` | `Integer` | 0–9 |
 | `combat_ratio_min` | `Integer` | Lower bound of CR bracket |
 | `combat_ratio_max` | `Integer` | Upper bound of CR bracket |
 | `enemy_loss` | `Integer` NULLABLE | Null = kill (`k`) |
 | `hero_loss` | `Integer` NULLABLE | Null = kill (`k`) |
 
-The CRT has 13 combat ratio brackets × 10 random numbers = 130 rows per book. `NULL` in `enemy_loss` or `hero_loss` represents an instant kill (`k`).
+The CRT has 13 combat ratio brackets × 10 random numbers = 130 rows per era. `NULL` in `enemy_loss` or `hero_loss` represents an instant kill (`k`).
 
 ### `disciplines`
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | |
-| `book_id` | `Integer` FK → `books.id` | Book that defines this discipline set |
-| `era` | `String(20)` | `kai`, `magnakai`, `grand_master`, `new_order` |
+| `era` | `String(20)` | `kai`, `magnakai`, `grand_master`, `new_order`. Disciplines are era-scoped — one set per era, shared by all books in that era. |
 | `name` | `String(50)` | e.g. `Camouflage`, `Weaponmastery` |
 | `html_id` | `String(30)` | Anchor name, e.g. `camflage`, `wpnmstry` |
 | `description` | `Text` | Rule text |
 | `mechanical_effect` | `String(200)` NULLABLE | Machine-readable effect, e.g. `+2 CS`, `+1 END/scene` |
 
+**Unique constraint**: `(era, name)`
+
 ### `scene_items`
 
-Items that can be picked up or lost in a scene. Items with `action='gain'` require explicit player pickup (accept or decline) before the character can make choices.
+Items that can be picked up or lost in a scene. Weapon/backpack/special items with `action='gain'` require explicit player pickup (accept or decline) before the character can make choices. Gold and meal items with `action='gain'` are auto-applied during phase progression (no accept/decline needed). Items with `is_mandatory=true` cannot be declined and override slot limits — the player gets the item even if over capacity; the next items phase forces resolution.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -134,6 +135,7 @@ Items that can be picked up or lost in a scene. Items with `action='gain'` requi
 | `item_type` | `String(20)` | `weapon`, `backpack`, `special`, `gold`, `meal` |
 | `quantity` | `Integer` | Default 1; for gold, the amount |
 | `action` | `String(10)` | `gain` or `lose` |
+| `is_mandatory` | `Boolean` | If true, item cannot be declined during items phase. Player must accept (managing inventory if needed). Default false. |
 | `phase_ordinal` | `Integer` | Position in the scene's phase sequence |
 | `source` | `String(10)` | `auto` or `manual` |
 
@@ -157,6 +159,7 @@ Outcome bands for phase-based random rolls. Each row represents one outcome for 
 |--------|------|-------|
 | `id` | `Integer` PK | |
 | `scene_id` | `Integer` FK → `scenes.id` | |
+| `roll_group` | `Integer` | Roll group within the scene. Default 0. Scenes with multiple sequential rolls use groups 0, 1, 2, etc. |
 | `range_min` | `Integer` | Lower bound of number range (0–9) |
 | `range_max` | `Integer` | Upper bound of number range (0–9) |
 | `effect_type` | `String(30)` | `gold_change`, `endurance_change`, `item_gain`, `item_loss`, `meal_change`, `scene_redirect` |
@@ -165,7 +168,7 @@ Outcome bands for phase-based random rolls. Each row represents one outcome for 
 | `ordinal` | `Integer` | Display order within scene |
 | `source` | `String(10)` | `auto` or `manual` |
 
-**Unique constraint**: `(scene_id, range_min, range_max)`
+**Unique constraint**: `(scene_id, roll_group, range_min, range_max)`
 
 ### `combat_modifiers`
 
@@ -175,9 +178,12 @@ Special combat rules that apply to specific encounters.
 |--------|------|-------|
 | `id` | `Integer` PK | |
 | `combat_encounter_id` | `Integer` FK → `combat_encounters.id` | |
-| `modifier_type` | `String(30)` | `cs_bonus`, `cs_penalty`, `double_damage`, `undead`, etc. |
+| `modifier_type` | `String(30)` | `cs_bonus`, `cs_penalty`, `double_damage`, `undead`, `enemy_mindblast`, etc. |
 | `modifier_value` | `String(100)` NULLABLE | Numeric or descriptive |
 | `condition` | `String(200)` NULLABLE | When the modifier applies |
+| `source` | `String(10)` | `auto` or `manual` |
+
+`enemy_mindblast` modifier type: when present, hero suffers -2 CS unless they have Mindshield discipline.
 
 ## Game Object Taxonomy
 
@@ -249,6 +255,8 @@ Defines carry-over rules between books. Populated by parser or admin.
 | `base_end_override` | `Integer` NULLABLE | New base END if era changes |
 | `notes` | `Text` NULLABLE | Free text for special rules |
 
+**Unique constraint**: `(from_book_id, to_book_id)`
+
 ### `book_starting_equipment`
 
 Available equipment for character creation per book. Drives the equipment wizard step.
@@ -315,6 +323,8 @@ Available equipment for character creation per book. Drives the equipment wizard
 | `character_id` | `Integer` FK → `characters.id` | |
 | `discipline_id` | `Integer` FK → `disciplines.id` | |
 | `weapon_type` | `String(30)` NULLABLE | Only for Weaponskill/Weaponmastery |
+
+**Unique constraint**: `(character_id, discipline_id)`
 
 ### `character_items`
 
@@ -385,9 +395,11 @@ Full round-by-round combat history. Current combat state derived from latest rou
 | `psi_surge_used` | `Boolean` | Whether Psi-surge was active this round |
 | `created_at` | `DateTime` | |
 
+**Unique constraint**: `(character_id, combat_encounter_id, round_number)`
+
 ### `character_events`
 
-Generic state-change audit trail. One row per phase step completion. Tracks every meaningful state change a character undergoes, tied to the scene and run that caused it.
+Generic state-change audit trail. One row per phase step completion. Tracks every meaningful state change a character undergoes, tied to the scene and run that caused it. Events follow the ops.md dual-layer design: `event_type` carries semantic meaning (what happened), while `operations` records atomic mutations (the mechanical layer). The `seq` column provides strict per-character ordering. The `parent_event_id` enables causality tracking — when one event triggers another (e.g., meal penalty causing death), the child references its parent.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -395,12 +407,38 @@ Generic state-change audit trail. One row per phase step completion. Tracks ever
 | `character_id` | `Integer` FK → `characters.id` | |
 | `scene_id` | `Integer` FK → `scenes.id` | Scene where the event occurred |
 | `run_number` | `Integer` | Which attempt at this book |
-| `event_type` | `String(30)` | `item_pickup`, `item_decline`, `item_loss`, `item_loss_skip`, `meal_consumed`, `meal_penalty`, `gold_change`, `endurance_change`, `healing`, `combat_start`, `combat_end`, `combat_skipped`, `evasion`, `death`, `restart`, `replay`, `discipline_gained`, `book_advance`, `random_roll`, `backpack_loss` |
+| `event_type` | `String(30)` | `item_pickup`, `item_decline`, `item_loss`, `item_loss_skip`, `item_consumed`, `meal_consumed`, `meal_penalty`, `gold_change`, `endurance_change`, `healing`, `combat_start`, `combat_end`, `combat_skipped`, `evasion`, `death`, `restart`, `replay`, `discipline_gained`, `book_advance`, `random_roll`, `backpack_loss` |
 | `phase` | `String(20)` NULLABLE | Which scene phase produced this event |
 | `details` | `Text` NULLABLE | JSON blob with event-specific data |
+| `seq` | `Integer` | Per-character sequence number. Strict ordering independent of timestamp. Generated via `SELECT MAX(seq)+1 WHERE character_id=?` within the same transaction. Safe because optimistic locking prevents concurrent character mutations. |
+| `operations` | `Text` NULLABLE | JSON array of ops.md operations (e.g., `[{"op": "meter.delta", "field": "endurance_current", "delta": -3}]`). Records mechanical mutations alongside semantic event_type. |
+| `parent_event_id` | `Integer` FK → `character_events.id` NULLABLE | Causality chain. Points to the event that triggered this one (e.g., meal_penalty → death). Null for root events. |
 | `created_at` | `DateTime` | |
 
 Coexists with `decision_log` (navigation/choice history) and `combat_rounds` (round-by-round combat detail). The events table captures state mutations; the other tables capture gameplay decisions and combat mechanics.
+
+### Field Classification (Spec / Status / Meter / Ref / Metadata)
+
+Classification of each `characters` column by ops.md field layer:
+
+| Column | Layer | Notes |
+|--------|-------|-------|
+| `name` | Spec | Player-authored |
+| `combat_skill_base` | Spec | Set at creation, changed on era transition |
+| `endurance_base` | Spec | Set at creation, changed on era transition |
+| `endurance_max` | Status | Computed from endurance_base + lore-circle bonuses |
+| `endurance_current` | Meter | Bounded [0, endurance_max]. Underflow = death |
+| `gold` | Meter | Bounded [0, 50]. Overflow = partial acceptance |
+| `meals` | Meter | Bounded [0, ?]. No upper bound yet |
+| `is_alive` | Status | Derived from endurance_current reaching 0 |
+| `current_scene_id` | Ref | Current position |
+| `active_combat_encounter_id` | Ref | Current combat |
+| `active_wizard_id` | Ref | Current wizard |
+| `death_count`, `current_run` | Spec | Incremented on restart/replay |
+| `version` | Metadata | Optimistic locking counter |
+| `rule_overrides` | Spec | Per-character config |
+| `scene_phase`, `scene_phase_index` | Status | Derived from phase progression |
+| Timestamps, `is_deleted`, `user_id`, `book_id` | Metadata/Ref | System fields |
 
 ## Wizard Tables
 
@@ -476,8 +514,8 @@ books 1──∞ scenes 1──∞ choices 1──∞ choice_random_outcomes
                   1──∞ combat_encounters 1──∞ combat_modifiers
                   1──∞ scene_items
                   1──∞ random_outcomes
-books 1──∞ combat_results
-books 1──∞ disciplines
+combat_results scoped by era (not FK to books)
+disciplines scoped by era (not FK to books)
 books 1──∞ book_transition_rules (as from_book or to_book)
 books 1──∞ book_starting_equipment
 
@@ -511,22 +549,28 @@ users 1──∞ reports
 - `scenes(book_id, number)` — unique, fast lookup by book + scene number
 - `choices(scene_id)` — all choices for a scene
 - `combat_encounters(scene_id)` — combats in a scene
-- `combat_results(book_id, random_number, combat_ratio_min)` — CRT lookup
+- `combat_results(era, random_number, combat_ratio_min)` — CRT lookup
 - `characters(user_id)` — list user's characters
 - `characters(user_id, is_deleted)` — list user's active characters
 - `decision_log(character_id, run_number, created_at)` — character history per run
 - `combat_rounds(character_id, combat_encounter_id, round_number)` — combat state lookup
 - `character_events(character_id, scene_id, created_at)` — events per scene visit
 - `character_events(character_id, event_type)` — filter by event type
+- `character_events(character_id, seq)` — ordered event replay
+- `character_events(parent_event_id)` — causality chain traversal
 - `reports(status, created_at)` — admin queue ordering
 - `game_objects(kind)` — filter by kind
 - `game_objects(kind, name)` — lookup by kind + name
 - `game_object_refs(source_id)` — outgoing refs
 - `game_object_refs(target_id)` — incoming refs
 - `weapon_categories(category)` — lookup weapons by category
-- `random_outcomes(scene_id)` — outcomes for a scene's random phase
+- `random_outcomes(scene_id, roll_group)` — outcomes for a scene's random phase by group
 - `choice_random_outcomes(choice_id)` — outcome bands for choice-triggered random
 - `book_starting_equipment(book_id)` — equipment list per book
+- `character_disciplines(character_id, discipline_id)` — has_discipline() lookups (also unique constraint)
+- `character_items(character_id, item_type)` — count_weapons() / count_backpack() checks
+- `character_wizard_progress(character_id, completed_at)` — finding active wizards
+- `decision_log(character_id, run_number)` — per-run aggregation
 
 ## Migration Strategy
 

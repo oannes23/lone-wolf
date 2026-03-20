@@ -6,7 +6,7 @@ REST API built with FastAPI. All endpoints return JSON. Auth uses JWT bearer tok
 
 ## Authentication
 
-**Token expiry**: Access token = 24 hours. Refresh token = 90 days.
+**Token expiry**: Access token = 24 hours. Refresh token = 90 days (stateless JWT, no server storage). Refresh tokens cannot be individually revoked. Password change should include an `issued_at` check to invalidate all prior tokens.
 
 ### `POST /auth/register`
 
@@ -159,7 +159,7 @@ Finalize a character with a previously rolled stat set. Character is created in 
 
 #### `GET /characters/{character_id}/wizard`
 
-Get the current wizard step and available options. Works for both character creation and book advance wizards. Shared path: this is the same endpoint as `GET /gameplay/{character_id}/wizard` (see Book Advance Wizard).
+Get the current wizard step and available options. Works for both character creation and book advance wizards. Single canonical path — no `/gameplay/` alias.
 
 ```json
 // Response 200 — Equipment selection (character creation)
@@ -272,13 +272,63 @@ Decision log in chronological order. Filterable by run.
 
 Query params: `?limit=50`, `?offset=0`, `?run=1`
 
+### `GET /characters/{character_id}/events`
+
+Player-accessible event log. Returns `character_events` in `seq` order with filtering.
+
+```json
+// Response 200
+[
+  {
+    "id": 42,
+    "seq": 15,
+    "event_type": "meal_penalty",
+    "phase": "eat",
+    "scene_number": 100,
+    "run_number": 1,
+    "details": { "endurance_change": -3 },
+    "operations": [{"op": "meter.delta", "field": "endurance_current", "delta": -3}],
+    "parent_event_id": null,
+    "created_at": "2025-01-15T10:35:00Z"
+  }
+]
+```
+
+Query params: `?event_type=death`, `?run=1`, `?scene_id=100`, `?limit=50`, `?offset=0`
+
+### `GET /characters/{character_id}/runs`
+
+Per-run summaries for a character.
+
+```json
+// Response 200
+[
+  {
+    "run_number": 1,
+    "started_at": "2025-01-15T10:00:00Z",
+    "outcome": "death",
+    "death_scene_number": 99,
+    "decision_count": 23,
+    "scenes_visited": 18
+  },
+  {
+    "run_number": 2,
+    "started_at": "2025-01-15T11:00:00Z",
+    "outcome": "in_progress",
+    "death_scene_number": null,
+    "decision_count": 12,
+    "scenes_visited": 10
+  }
+]
+```
+
 ### `DELETE /characters/{character_id}`
 
 Soft-delete a character. Sets `is_deleted = true` and `deleted_at` timestamp. Character no longer appears in `GET /characters` list and does not count toward `max_characters` limit.
 
 ## Gameplay
 
-All gameplay endpoints require auth. The character must belong to the authenticated user. **All state-mutating endpoints accept an optional `version` field** for optimistic locking — if provided and it doesn't match the character's current version, the server returns 409.
+All gameplay endpoints require auth. The character must belong to the authenticated user. **All state-mutating endpoints require a `version` field** for optimistic locking — if it doesn't match the character's current version, the server returns 409. Omitting `version` returns 422.
 
 ### `GET /gameplay/{character_id}/scene`
 
@@ -294,8 +344,8 @@ Get the current scene with available actions.
   "phase_index": 4,
   "phase_sequence": ["item_loss", "items", "eat", "heal", "choices"],
   "phase_results": [
-    { "type": "eat", "result": "meal_consumed", "meals_remaining": 1 },
-    { "type": "heal", "result": "healed", "amount": 1, "endurance_current": 23 }
+    { "type": "eat", "result": "meal_consumed", "meals_remaining": 1, "severity": "info" },
+    { "type": "heal", "result": "healed", "amount": 1, "endurance_current": 23, "severity": "info" }
   ],
   "choices": [
     {
@@ -330,8 +380,8 @@ Get the current scene with available actions.
   "choices": [...],
   "combat": null,
   "pending_items": [
-    { "id": 15, "item_name": "Sword", "item_type": "weapon", "quantity": 1 },
-    { "id": 16, "item_name": "Gold Crowns", "item_type": "gold", "quantity": 12 }
+    { "id": 15, "item_name": "Sword", "item_type": "weapon", "quantity": 1, "is_mandatory": false },
+    { "id": 16, "item_name": "Gold Crowns", "item_type": "gold", "quantity": 12, "is_mandatory": false }
   ],
   "is_death": false,
   "is_victory": false,
@@ -353,7 +403,9 @@ Get the current scene with available actions.
     "enemy_end_remaining": 24,
     "hero_end_remaining": 22,
     "rounds_fought": 0,
-    "can_evade": false
+    "can_evade": false,
+    "evasion_possible": true,
+    "evasion_after_rounds": 3
   },
   "pending_items": [],
   "is_death": false,
@@ -416,6 +468,8 @@ Make a choice to navigate to another scene.
 
 When `requires_roll` is true, the player must call `POST /gameplay/{character_id}/roll` to resolve. The roll auto-applies the outcome and transitions to the target scene.
 
+**Gold-gated choices**: When a choice with `condition_type='gold'` is selected, the gold amount (`int(condition_value)`) is automatically deducted and a `gold_change` event is logged.
+
 Returns `400` if the choice is not available. Returns `409` if the character has unresolved combat, pending items, is not in the `choices` phase, or if version doesn't match.
 
 ### `POST /gameplay/{character_id}/combat/round`
@@ -470,14 +524,14 @@ Eating is fully automatic during phase progression — there is no dedicated eat
 
 ```json
 // In GET /gameplay/{character_id}/scene → phase_results
-{ "type": "eat", "result": "meal_consumed", "meals_remaining": 1 }
-{ "type": "eat", "result": "hunting_used" }
-{ "type": "eat", "result": "meal_penalty", "endurance_change": -3, "endurance_current": 19 }
+{ "type": "eat", "result": "meal_consumed", "meals_remaining": 1, "severity": "info" }
+{ "type": "eat", "result": "hunting_used", "severity": "info" }
+{ "type": "eat", "result": "meal_penalty", "endurance_change": -3, "endurance_current": 19, "severity": "warn" }
 ```
 
 ### `POST /gameplay/{character_id}/item`
 
-Resolve a pending scene item (accept or decline). During the `items` phase, the inventory endpoint is also available for dropping/swapping items to make room.
+Resolve a pending scene item (accept or decline). During the `items` phase, the inventory endpoint is also available for dropping/swapping items to make room. Items with `is_mandatory=true` cannot be declined — attempting to decline returns 400.
 
 ```json
 // Request — accept
@@ -524,6 +578,27 @@ Manage inventory (drop, equip, unequip). Available at any time, **including duri
 ```
 
 Actions: `drop`, `equip`, `unequip`. Returns `400` if constraints are violated.
+
+### `POST /gameplay/{character_id}/use-item`
+
+Use a consumable item (Healing Potion, Laumspur, etc.). Available at any phase. Item effects are data-driven via game_object `properties` JSON.
+
+```json
+// Request
+{ "item_name": "Healing Potion", "version": 5 }
+
+// Response 200
+{
+  "item_name": "Healing Potion",
+  "effect": "endurance_restore",
+  "amount": 4,
+  "endurance_current": 22,
+  "item_consumed": true,
+  "version": 6
+}
+```
+
+Returns `400` if the item is not consumable (no `consumable: true` in properties) or if the character doesn't have the item. Logs an `item_consumed` character event.
 
 ### `POST /gameplay/{character_id}/roll`
 
@@ -644,11 +719,30 @@ Returns `400` if the character is not at a victory scene. Returns `409` if the c
 
 ### Book Advance Wizard
 
-Uses the generic wizard system. **Lazy initialization**: calling `GET /gameplay/{character_id}/wizard` at a victory scene with no active wizard auto-creates the advance wizard (creates `character_wizard_progress` row, sets `active_wizard_id`). The character must be at a victory scene and must not have already started a replay.
+Uses the generic wizard system. **Explicit initialization**: the player must call `POST /gameplay/{character_id}/advance` to start the advance wizard. Until initiated, replay remains available. The character must be at a victory scene and must not have already started a replay.
 
-#### `GET /gameplay/{character_id}/wizard`
+#### `POST /gameplay/{character_id}/advance`
 
-Returns the current wizard step. Same endpoint as `GET /characters/{character_id}/wizard` — both paths resolve to the same handler. If the character is at a victory scene with no active wizard, the advance wizard is auto-created on this call.
+Start the book advance wizard. Creates `character_wizard_progress` row and sets `active_wizard_id`. Returns the first wizard step.
+
+```json
+// Request (no body needed)
+
+// Response 201
+{
+  "wizard_type": "book_advance",
+  "step": "discipline",
+  "step_index": 0,
+  "total_steps": 3,
+  "book": { "id": 2, "title": "Fire on the Water" }
+}
+```
+
+Returns `400` if the character is not at a victory scene. Returns `409` if the character already has an active wizard or has started a replay. Returns `404` if there's no next book.
+
+#### `GET /characters/{character_id}/wizard`
+
+Returns the current wizard step. Single canonical path for both character creation and book advance wizards.
 
 ```json
 // Response 200 — Step 1: Discipline selection
@@ -695,9 +789,9 @@ Returns the current wizard step. Same endpoint as `GET /characters/{character_id
 }
 ```
 
-#### `POST /gameplay/{character_id}/wizard`
+#### `POST /characters/{character_id}/wizard`
 
-Submit the current step's choice (same endpoint as character creation wizard).
+Submit the current step's choice. Single canonical path for both creation and advance wizards.
 
 ```json
 // Step 1 request
@@ -863,8 +957,9 @@ No `POST /admin/auth/register` endpoint — admins are created via CLI only.
 
 ### Content Management
 
-CRUD endpoints for content tables. All follow the same pattern:
+Full CRUD endpoints for content tables. All follow the same pattern:
 
+- `POST /admin/{resource}` — create (sets `source` to `manual`)
 - `GET /admin/{resource}` — list with pagination and filters
 - `GET /admin/{resource}/{id}` — detail view
 - `PUT /admin/{resource}/{id}` — update (sets `source` to `manual`)
@@ -890,10 +985,11 @@ Content edits take effect immediately (no draft/publish workflow).
 
 ## Optimistic Locking
 
-All state-mutating gameplay endpoints accept an optional `version` field in the request body. If provided:
+All state-mutating gameplay endpoints require a `version` field in the request body:
 - The server compares it to the character's current `version`
 - If they match, the operation proceeds and `version` is incremented
-- If they don't match, the server returns 409:
+- If they don't match, the server returns 409
+- If `version` is omitted, the server returns 422:
 
 ```json
 {
