@@ -33,6 +33,14 @@ def db(engine):
     session = Session(bind=connection)
     # Use a savepoint so that nested transactions work correctly inside tests
     session.begin_nested()
+
+    # Restart savepoint after any nested transaction ends (e.g., IntegrityError rollback)
+    # This is the SQLAlchemy-recommended pattern for test suites.
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(session, trans):
+        if trans.nested and not trans._parent.nested:
+            session.begin_nested()
+
     yield session
     session.close()
     transaction.rollback()

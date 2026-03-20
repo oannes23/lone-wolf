@@ -638,6 +638,50 @@ def _group_equipment_by_book() -> list[tuple[int, list[tuple]]]:
 # ---------------------------------------------------------------------------
 
 
+def seed_all(db) -> None:
+    """Seed all static reference data into the given session (no commit)."""
+    # 1. Books
+    book_number_map: dict[int, Book] = {}
+    for book_data in BOOKS:
+        book = upsert_book(db, book_data)
+        db.flush()
+        book_number_map[book_data["number"]] = book
+    db.flush()
+
+    # 2. Disciplines
+    for disc_data in DISCIPLINES:
+        upsert_discipline(db, disc_data)
+    db.flush()
+
+    # 3. CRT
+    for row in COMBAT_RESULTS:
+        upsert_combat_result(db, *row)
+    db.flush()
+
+    # 4. Weapon categories
+    for weapon_name, category in WEAPON_CATEGORIES:
+        upsert_weapon_category(db, weapon_name, category)
+    db.flush()
+
+    # 5. Wizard templates
+    for tmpl_data in WIZARD_TEMPLATES:
+        upsert_wizard_template(db, tmpl_data)
+    db.flush()
+
+    # 6. Book transition rules
+    for rule in TRANSITION_RULES:
+        from_num, to_num, max_w, max_bp, sp_carry, gold_carry, new_disc, notes = rule
+        from_book = book_number_map[from_num]
+        to_book = book_number_map[to_num]
+        upsert_transition_rule(
+            db, from_book, to_book, max_w, max_bp, sp_carry, gold_carry, new_disc, notes
+        )
+    db.flush()
+
+    # 7. Starting equipment
+    seed_starting_equipment(db, book_number_map)
+
+
 def run_seed() -> None:
     """Run all seed operations and print a summary."""
     # Ensure all tables exist (safe no-op if already present).
@@ -645,59 +689,11 @@ def run_seed() -> None:
 
     db = SessionLocal()
     try:
-        # 1. Books
-        book_number_map: dict[int, Book] = {}
-        for book_data in BOOKS:
-            book = upsert_book(db, book_data)
-            db.flush()
-            book_number_map[book_data["number"]] = book
-        db.flush()
-        print(f"  Books:              {len(BOOKS)} rows")
-
-        # 2. Disciplines
-        for disc_data in DISCIPLINES:
-            upsert_discipline(db, disc_data)
-        db.flush()
-        print(f"  Disciplines:        {len(DISCIPLINES)} rows")
-
-        # 3. CRT
-        for row in COMBAT_RESULTS:
-            upsert_combat_result(db, *row)
-        db.flush()
-        print(f"  CombatResults:      {len(COMBAT_RESULTS)} rows")
-
-        # 4. Weapon categories
-        for weapon_name, category in WEAPON_CATEGORIES:
-            upsert_weapon_category(db, weapon_name, category)
-        db.flush()
-        print(f"  WeaponCategories:   {len(WEAPON_CATEGORIES)} rows")
-
-        # 5. Wizard templates
-        total_steps = sum(len(t["steps"]) for t in WIZARD_TEMPLATES)
-        for tmpl_data in WIZARD_TEMPLATES:
-            upsert_wizard_template(db, tmpl_data)
-        db.flush()
-        print(f"  WizardTemplates:    {len(WIZARD_TEMPLATES)} templates, {total_steps} steps")
-
-        # 6. Book transition rules
-        for rule in TRANSITION_RULES:
-            from_num, to_num, max_w, max_bp, sp_carry, gold_carry, new_disc, notes = rule
-            from_book = book_number_map[from_num]
-            to_book = book_number_map[to_num]
-            upsert_transition_rule(
-                db, from_book, to_book, max_w, max_bp, sp_carry, gold_carry, new_disc, notes
-            )
-        db.flush()
-        print(f"  TransitionRules:    {len(TRANSITION_RULES)} rows")
-
-        # 7. Starting equipment
-        equip_count = seed_starting_equipment(db, book_number_map)
-        print(f"  StartingEquipment:  {equip_count} rows")
-
+        seed_all(db)
         db.commit()
 
         # Verification counts from DB
-        print("\nVerification (row counts from database):")
+        print("Seeded static reference data:")
         print(f"  books:                    {db.query(Book).count()}")
         print(f"  disciplines:              {db.query(Discipline).count()}")
         print(f"  combat_results:           {db.query(CombatResults).count()}")
