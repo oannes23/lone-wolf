@@ -5,11 +5,20 @@ all-books-svg.zip
 # Python
 __pycache__/
 *.py[cod]
+*.pyc
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
+*.egg-info/
+
+# uv
+# uv.lock is committed for reproducible builds
+
+# Linting / type checking
+.ruff_cache/
+.mypy_cache/
 
 # Parser cache
 .parser_cache/
@@ -25,10 +34,12 @@ venv/
 # Database
 *.db
 *.sqlite3
+lone_wolf.db
 
 # Environment
 .env
 .env.*
+!.env.example
 
 # Claude Code local settings
 .claude/
