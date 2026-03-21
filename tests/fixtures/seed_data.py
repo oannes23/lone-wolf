@@ -51,21 +51,21 @@ _SAMPLE_CRT = [
 ]
 
 # ---------------------------------------------------------------------------
-# Weapon categories (11 canonical rows)
+# Weapon categories — matches production seed_static.py
 # ---------------------------------------------------------------------------
 
 _WEAPON_CATEGORIES = [
-    ("Dagger", "dagger"),
-    ("Spear", "spear"),
-    ("Mace", "mace"),
-    ("Short Sword", "short-sword"),
-    ("Warhammer", "warhammer"),
-    ("Sword", "sword"),
-    ("Axe", "axe"),
-    ("Quarterstaff", "quarterstaff"),
-    ("Broadsword", "broadsword"),
-    ("Lance", "lance"),
-    ("Bow", "bow"),
+    ("Sword", "Sword"),
+    ("Broadsword", "Sword"),
+    ("Short Sword", "Sword"),
+    ("Sommerswerd", "Sword"),
+    ("Axe", "Axe"),
+    ("Mace", "Mace"),
+    ("Spear", "Spear"),
+    ("Magic Spear", "Spear"),
+    ("Dagger", "Dagger"),
+    ("Quarterstaff", "Quarterstaff"),
+    ("Warhammer", "Warhammer"),
 ]
 
 # ---------------------------------------------------------------------------

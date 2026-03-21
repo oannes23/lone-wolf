@@ -1,5 +1,9 @@
 """Player table models — users, characters, inventory, decisions, combat history, and events."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -15,6 +19,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.content import Discipline
 
 # ---------------------------------------------------------------------------
 # Shared CHECK constraint expressions
@@ -180,6 +187,7 @@ class CharacterDiscipline(Base):
     character: Mapped["Character"] = relationship(
         "Character", back_populates="disciplines"
     )
+    discipline: Mapped["Discipline"] = relationship("Discipline")
 
 
 class CharacterItem(Base):

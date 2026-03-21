@@ -8,7 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.dependencies import VersionConflictError
 from app.limiter import limiter
-from app.routers import auth
+from app.routers import auth, characters, gameplay
 from app.routers.admin import auth as admin_auth
 from app.routers.admin import users as admin_users
 
@@ -37,6 +37,8 @@ def create_app() -> FastAPI:
 
     # Routers
     app.include_router(auth.router)
+    app.include_router(characters.router)
+    app.include_router(gameplay.router)
     app.include_router(admin_auth.router)
     app.include_router(admin_users.router)
 

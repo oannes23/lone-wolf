@@ -10,7 +10,7 @@ Overall tracker for the Lone Wolf CYOA project. Updated as epics and stories are
 | 1 | [Project Foundation & Database](epic-1-foundation.md) | 8 | Complete | 1 | Epic 0 |
 | 2 | [Authentication & User Management](epic-2-auth.md) | 5 | Complete | 2 | Epic 1 |
 | 3 | [Game Engine (Pure Functions)](epic-3-engine.md) | 7 | Complete | 2 | Epic 1 |
-| 4 | [Character Creation & Wizard System](epic-4-wizard.md) | 5 | Not Started | 3 | Epics 1, 3 |
+| 4 | [Character Creation & Wizard System](epic-4-wizard.md) | 5 | Complete | 3 | Epics 1, 3 |
 | 5 | [Parser Pipeline](epic-5-parser.md) | 6 | Complete | 2-3 | Epic 1 |
 | 6 | [Core Gameplay API](epic-6-gameplay-api.md) | 7 | Not Started | 4 | Epics 2, 3, 4 |
 | 7 | [Content Browse, Social & Admin API](epic-7-content-api.md) | 5 | Not Started | 4 | Epics 1, 2 |
@@ -90,11 +90,11 @@ Phase 6:      [E9 Admin UI]
 ### Epic 4: Character Creation & Wizard System
 | Story | Name | Status |
 |-------|------|--------|
-| 4.1 | Stat Rolling & Roll Token | Not Started |
-| 4.2 | Character Creation Service | Not Started |
-| 4.3 | Equipment Wizard (Character Creation) | Not Started |
-| 4.4 | Book Advance Wizard | Not Started |
-| 4.5 | Wizard API Endpoints | Not Started |
+| 4.1 | Stat Rolling & Roll Token | Complete |
+| 4.2 | Character Creation Service | Complete |
+| 4.3 | Equipment Wizard (Character Creation) | Complete |
+| 4.4 | Book Advance Wizard | Complete |
+| 4.5 | Wizard API Endpoints | Complete |
 
 ### Epic 5: Parser Pipeline
 | Story | Name | Status |
@@ -172,6 +172,32 @@ Epics 2, 3, and 5 all completed in parallel as planned. All Phase 2 deliverables
 - **`phase_sequence_override` type** — Changed from `list[str]` to `list[dict]` per spec.
 - **CharacterState** — Added `era`, `current_scene_id`, `scene_phase`, `scene_phase_index`, `active_combat_encounter_id` fields for downstream stories.
 - **`damage_multiplier`** — Changed from hardcoded "undead" check to generic `special_vs` matching.
+
+### Phase 3 Completion (2026-03-20)
+
+Epic 4 completed. All 5 stories implemented with multi-reviewer gates after each story (code-reviewer, qa-engineer, tech-writer, game-designer, architect).
+
+- **Epic 4** — `app/routers/characters.py` (roll, create, wizard endpoints), `app/routers/gameplay.py` (advance endpoint), `app/services/character_service.py`, `app/services/wizard_service.py`, `app/schemas/characters.py`. Full character lifecycle: roll → create → equipment wizard → play → victory → book advance wizard.
+
+**Files created**: `app/routers/characters.py`, `app/routers/gameplay.py`, `app/services/character_service.py`, `app/services/wizard_service.py`
+
+**Files modified**: `app/schemas/characters.py`, `app/main.py`, `app/models/player.py` (CharacterDiscipline.discipline relationship), `app/dependencies.py` (existing, used by new endpoints)
+
+**Test count**: 844 tests passing (61 new Epic 4 integration tests).
+
+**Next phase unlocked**: Epics 6 (Core Gameplay API) and 7 (Content Browse, Social & Admin API) may now begin in parallel.
+
+### Phase 3 Review Findings (addressed)
+- **Flat error_code format** — Error responses initially nested error_code inside detail dict; refactored to flat top-level format matching version conflict handler convention.
+- **weapon_skill_type without Weaponskill** — Initially rejected with 400; changed to silently ignore per spec ("it is ignored").
+- **Weapon category casing** — Test fixtures used lowercase categories ("sword"); production seed uses title-case ("Sword"). Fixed all test fixtures to match production.
+- **Discipline name "Mind Blast" vs "Mindblast"** — Test fixture used incorrect name with space; corrected to match production seed.
+- **disciplines_json snapshot key** — Used "weapon_type" instead of "weapon_category" per data-model spec; corrected.
+- **endurance_current at wizard completion** — New characters with armor bonuses started below full health; fixed to set endurance_current = endurance_max for character creation (not book advance).
+- **Duplicate discipline IDs** — Added explicit check with clear error message (was caught incidentally by DB query returning fewer rows).
+- **Weapon category validation in advance** — Was missing in handle_discipline_step; added to match character_service pattern.
+- **Version required on /advance** — POST /gameplay/{id}/advance was missing version requirement per spec todo #68; added AdvanceRequest schema with verify_version.
+- **int(raw_version) error handling** — Added try/except for malformed version in post_wizard to prevent 500.
 
 ---
 
