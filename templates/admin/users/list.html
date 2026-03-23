@@ -1,0 +1,66 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Users{% endblock %}
+
+{% block content %}
+  <h1>Users</h1>
+
+  <section>
+    <p class="muted-note">{{ user_data | length }} registered user(s)</p>
+
+    {% if user_data %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Max Characters</th>
+            <th>Characters</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in user_data %}
+          <tr>
+            <td>{{ row.user.id }}</td>
+            <td><a href="/admin/ui/characters?user_id={{ row.user.id }}&deleted=all">{{ row.user.username }}</a></td>
+            <td>{{ row.user.email }}</td>
+            <td
+              id="max-chars-cell-{{ row.user.id }}"
+              class="max-chars-cell"
+            >
+              <form
+                hx-post="/admin/ui/users/{{ row.user.id }}/max-characters"
+                hx-target="#max-chars-cell-{{ row.user.id }}"
+                hx-swap="innerHTML"
+                style="margin:0;"
+              >
+                <input
+                  type="number"
+                  name="max_characters"
+                  value="{{ row.user.max_characters }}"
+                  min="1"
+                  aria-label="Max characters for {{ row.user.username }}"
+                  class="inline-number-input"
+                  hx-trigger="change"
+                  hx-post="/admin/ui/users/{{ row.user.id }}/max-characters"
+                  hx-target="#max-chars-cell-{{ row.user.id }}"
+                  hx-swap="innerHTML"
+                  hx-include="closest form"
+                >
+              </form>
+            </td>
+            <td>{{ row.char_count }}</td>
+            <td>{{ row.user.created_at.strftime("%Y-%m-%d") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted-note">No users registered yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

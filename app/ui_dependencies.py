@@ -11,8 +11,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.admin import AdminUser
 from app.models.player import User
-from app.services.auth_service import resolve_user_from_token
+from app.services.auth_service import decode_token, resolve_user_from_token
 
 # ---------------------------------------------------------------------------
 # Jinja2 template engine — shared across all UI routers
@@ -75,3 +76,65 @@ def login_required_handler(request: Request, exc: LoginRequired) -> RedirectResp
     Registered as an exception handler in ``app/main.py``.
     """
     return RedirectResponse(url="/ui/login", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Admin login-required sentinel exception
+# ---------------------------------------------------------------------------
+
+
+class AdminLoginRequired(Exception):
+    """Raised by admin UI dependencies when the admin is not authenticated.
+
+    The app's exception handler converts this to a 303 redirect to /admin/ui/login.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Admin cookie-based authentication dependency
+# ---------------------------------------------------------------------------
+
+
+def get_current_admin_ui(request: Request, db: Session = Depends(get_db)) -> AdminUser:
+    """Resolve the current admin from the httpOnly admin_session cookie.
+
+    Reads the JWT admin access token stored in the "admin_session" cookie,
+    verifies it with expected_type="admin_access", and returns the authenticated
+    AdminUser. If no valid token is present, raises ``AdminLoginRequired`` which
+    the app-level exception handler converts to a 303 redirect to
+    ``/admin/ui/login``.
+
+    Args:
+        request: The incoming HTTP request (provides cookie access).
+        db: Database session injected by FastAPI.
+
+    Returns:
+        The authenticated ``AdminUser`` ORM instance.
+
+    Raises:
+        AdminLoginRequired: If the cookie is missing, the token is
+            invalid/expired, or the admin no longer exists.
+    """
+    token = request.cookies.get("admin_session")
+    if not token:
+        raise AdminLoginRequired()
+
+    try:
+        payload = decode_token(token, expected_type="admin_access")
+    except ValueError:
+        raise AdminLoginRequired()
+
+    admin_id = int(payload["sub"])
+    admin = db.query(AdminUser).filter(AdminUser.id == admin_id).first()
+    if not admin:
+        raise AdminLoginRequired()
+
+    return admin
+
+
+def admin_login_required_handler(request: Request, exc: AdminLoginRequired) -> RedirectResponse:  # noqa: ARG001
+    """Convert an AdminLoginRequired exception to a 303 redirect to /admin/ui/login.
+
+    Registered as an exception handler in ``app/main.py``.
+    """
+    return RedirectResponse(url="/admin/ui/login", status_code=303)

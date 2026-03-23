@@ -1,0 +1,61 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Report Statistics{% endblock %}
+
+{% block content %}
+  <nav aria-label="Breadcrumb">
+    <a href="/admin/ui/reports">&larr; Back to report queue</a>
+  </nav>
+
+  <h1>Report Statistics</h1>
+
+  <div class="admin-dashboard-grid">
+    <article class="admin-card">
+      <h2 class="admin-card-title">Total Reports</h2>
+      <p class="admin-card-value">{{ total }}</p>
+    </article>
+
+    <article class="admin-card">
+      <h2 class="admin-card-title">Resolution Rate</h2>
+      <p class="admin-card-value {% if resolution_rate >= 50 %}admin-card-value-ok{% else %}admin-card-value-warn{% endif %}">
+        {{ "%.1f"|format(resolution_rate) }}%
+      </p>
+    </article>
+
+    {% for status, count in by_status %}
+    <article class="admin-card">
+      <h2 class="admin-card-title">
+        <span class="status-badge status-badge-{{ status }}">{{ status }}</span>
+      </h2>
+      <p class="admin-card-value">{{ count }}</p>
+      <a href="/admin/ui/reports?status={{ status }}" class="admin-card-link">View</a>
+    </article>
+    {% endfor %}
+  </div>
+
+  <section>
+    <h2>Reports by Tag</h2>
+    {% if by_tag %}
+    <table>
+      <thead>
+        <tr>
+          <th>Tag</th>
+          <th>Count</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tag, count in by_tag %}
+        <tr>
+          <td><span class="tag-badge">{{ tag }}</span></td>
+          <td>{{ count }}</td>
+          <td><a href="/admin/ui/reports?tags={{ tag }}">Filter</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted-note">No tagged reports yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

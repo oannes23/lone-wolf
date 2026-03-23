@@ -1,0 +1,111 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Characters{% endblock %}
+
+{% block content %}
+  <h1>Characters</h1>
+
+  <section class="admin-filters">
+    <form method="get" action="/admin/ui/characters">
+      <div class="filter-row">
+        <label for="filter-user-id">
+          User ID
+          <input
+            id="filter-user-id"
+            type="text"
+            name="user_id"
+            value="{{ filter_user_id }}"
+            placeholder="e.g. 42"
+          >
+        </label>
+        <label for="filter-book-id">
+          Book ID
+          <input
+            id="filter-book-id"
+            type="text"
+            name="book_id"
+            value="{{ filter_book_id }}"
+            placeholder="e.g. 1"
+          >
+        </label>
+        <label for="filter-deleted">
+          Status
+          <select id="filter-deleted" name="deleted">
+            <option value="all" {% if filter_deleted == 'all' %}selected{% endif %}>All</option>
+            <option value="active" {% if filter_deleted == 'active' %}selected{% endif %}>Active Only</option>
+            <option value="deleted" {% if filter_deleted == 'deleted' %}selected{% endif %}>Deleted Only</option>
+          </select>
+        </label>
+        <button type="submit">Filter</button>
+        <a href="/admin/ui/characters" role="button" class="secondary">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <p class="muted-note">
+      Showing {{ char_rows | length }} of {{ total }} character(s)
+      {% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
+    </p>
+
+    {% if char_rows %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>User</th>
+            <th>Book</th>
+            <th>Alive</th>
+            <th>Deleted</th>
+            <th>Version</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in char_rows %}
+          <tr id="char-row-{{ row.char.id }}">
+            <td><a href="/admin/ui/events?character_id={{ row.char.id }}">{{ row.char.id }}</a></td>
+            <td>{{ row.char.name }}</td>
+            <td>{{ row.username }}</td>
+            <td>{{ row.book_title }}</td>
+            <td>{{ "Yes" if row.char.is_alive else "No" }}</td>
+            <td>{{ "Yes" if row.char.is_deleted else "No" }}</td>
+            <td>{{ row.char.version }}</td>
+            <td>
+              {% if row.char.is_deleted %}
+              <button
+                hx-post="/admin/ui/characters/{{ row.char.id }}/restore"
+                hx-target="#char-row-{{ row.char.id }}"
+                hx-swap="innerHTML"
+                class="secondary small"
+              >
+                Restore
+              </button>
+              {% else %}
+              <span class="muted-note">Active</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <nav class="pagination" aria-label="Character list pages">
+      {% if page > 1 %}
+        <a href="?user_id={{ filter_user_id }}&book_id={{ filter_book_id }}&deleted={{ filter_deleted }}&page={{ page - 1 }}">&larr; Previous</a>
+      {% endif %}
+      {% if page < total_pages %}
+        <a href="?user_id={{ filter_user_id }}&book_id={{ filter_book_id }}&deleted={{ filter_deleted }}&page={{ page + 1 }}">Next &rarr;</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <p class="muted-note">No characters match the current filters.</p>
+    {% endif %}
+  </section>
+{% endblock %}

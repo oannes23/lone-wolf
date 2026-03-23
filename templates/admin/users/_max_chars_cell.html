@@ -1,0 +1,20 @@
+<form
+  hx-post="/admin/ui/users/{{ user.id }}/max-characters"
+  hx-target="#max-chars-cell-{{ user.id }}"
+  hx-swap="innerHTML"
+  style="margin:0;"
+>
+  <input
+    type="number"
+    name="max_characters"
+    value="{{ user.max_characters }}"
+    min="1"
+    aria-label="Max characters for {{ user.username }}"
+    class="inline-number-input"
+    hx-trigger="change"
+    hx-post="/admin/ui/users/{{ user.id }}/max-characters"
+    hx-target="#max-chars-cell-{{ user.id }}"
+    hx-swap="innerHTML"
+    hx-include="closest form"
+  >
+</form>

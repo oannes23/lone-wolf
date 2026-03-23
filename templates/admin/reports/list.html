@@ -1,0 +1,95 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Report Queue{% endblock %}
+
+{% block content %}
+  <h1>Report Queue</h1>
+
+  <section class="admin-filters">
+    <form method="get" action="/admin/ui/reports">
+      <div class="filter-row">
+        <label for="status-filter">
+          Status
+          <select id="status-filter" name="status">
+            <option value="" {% if not filter_status %}selected{% endif %}>All</option>
+            <option value="open" {% if filter_status == 'open' %}selected{% endif %}>Open</option>
+            <option value="triaging" {% if filter_status == 'triaging' %}selected{% endif %}>Triaging</option>
+            <option value="resolved" {% if filter_status == 'resolved' %}selected{% endif %}>Resolved</option>
+            <option value="wont_fix" {% if filter_status == 'wont_fix' %}selected{% endif %}>Won't Fix</option>
+          </select>
+        </label>
+        <label for="tags-filter">
+          Tag
+          <input
+            id="tags-filter"
+            type="text"
+            name="tags"
+            value="{{ filter_tags }}"
+            placeholder="e.g. meal_issue"
+          >
+        </label>
+        <button type="submit">Filter</button>
+        <a href="/admin/ui/reports" role="button" class="secondary">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <p class="muted-note">
+      Showing {{ reports | length }} of {{ total }} reports
+      {% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
+      &mdash; <a href="/admin/ui/reports/stats">View stats</a>
+    </p>
+
+    {% if reports %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tags</th>
+            <th>Status</th>
+            <th>User ID</th>
+            <th>Scene ID</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for report in reports %}
+          <tr>
+            <td><a href="/admin/ui/reports/{{ report.id }}">{{ report.id }}</a></td>
+            <td>
+              {% for tag in report.tags %}
+                <span class="tag-badge">{{ tag }}</span>
+              {% else %}
+                <span class="muted-note">(none)</span>
+              {% endfor %}
+            </td>
+            <td>
+              <span class="status-badge status-badge-{{ report.status }}">{{ report.status }}</span>
+            </td>
+            <td>{{ report.user_id }}</td>
+            <td>{{ report.scene_id if report.scene_id else '—' }}</td>
+            <td>{{ report.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <nav class="pagination" aria-label="Report list pages">
+      {% if page > 1 %}
+        <a href="?status={{ filter_status }}&tags={{ filter_tags }}&page={{ page - 1 }}">&larr; Previous</a>
+      {% endif %}
+      {% if page < total_pages %}
+        <a href="?status={{ filter_status }}&tags={{ filter_tags }}&page={{ page + 1 }}">Next &rarr;</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <p class="muted-note">No reports match the current filters.</p>
+    {% endif %}
+  </section>
+{% endblock %}

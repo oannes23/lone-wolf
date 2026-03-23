@@ -1,0 +1,76 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+  <h1>Dashboard</h1>
+
+  <div class="admin-dashboard-grid">
+    <article class="admin-card">
+      <h2 class="admin-card-title">Open Reports</h2>
+      <p class="admin-card-value admin-card-value-warn">{{ open_reports }}</p>
+      <a href="/admin/ui/reports?status=open" class="admin-card-link">View open reports</a>
+    </article>
+
+    <article class="admin-card">
+      <h2 class="admin-card-title">Total Users</h2>
+      <p class="admin-card-value">{{ total_users }}</p>
+      <a href="/admin/ui/users" class="admin-card-link">Manage users</a>
+    </article>
+
+    <article class="admin-card">
+      <h2 class="admin-card-title">Total Characters</h2>
+      <p class="admin-card-value">{{ total_characters }}</p>
+      <a href="/admin/ui/users" class="admin-card-link">View characters</a>
+    </article>
+
+    <article class="admin-card">
+      <h2 class="admin-card-title">Books with Content</h2>
+      <p class="admin-card-value">{{ books_with_content }}</p>
+      <a href="/admin/ui/content" class="admin-card-link">Manage content</a>
+    </article>
+  </div>
+
+  {% if recent_reports %}
+  <section class="admin-recent-reports">
+    <h2>Recent Reports</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Tags</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for report in recent_reports %}
+        <tr>
+          <td><a href="/admin/ui/reports/{{ report.id }}">{{ report.id }}</a></td>
+          <td>
+            <span class="status-badge status-badge-{{ report.status }}">{{ report.status }}</span>
+          </td>
+          <td>{{ report.tags }}</td>
+          <td>{{ report.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% else %}
+  <section class="admin-recent-reports">
+    <h2>Recent Reports</h2>
+    <p class="muted-note">No reports yet.</p>
+  </section>
+  {% endif %}
+
+  <section class="admin-quick-links">
+    <h2>Quick Links</h2>
+    <ul>
+      <li><a href="/admin/ui/reports?status=open">Triage open reports</a></li>
+      <li><a href="/admin/ui/reports?status=triaging">View reports being triaged</a></li>
+      <li><a href="/admin/ui/content">Browse all content</a></li>
+      <li><a href="/admin/ui/users">Manage user accounts</a></li>
+    </ul>
+  </section>
+{% endblock %}

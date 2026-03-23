@@ -2,7 +2,7 @@
 
 **Phase**: 6
 **Dependencies**: Epics 7, 8
-**Status**: Not Started
+**Status**: Complete
 
 Admin interface for content management, report triage, and user management. Shares UI patterns and Pico CSS setup from Epic 8. Separate admin layout with admin-specific navigation.
 
@@ -10,7 +10,7 @@ Admin interface for content management, report triage, and user management. Shar
 
 ## Story 9.1: Admin Scaffolding & Auth
 
-**Status**: Not Started
+**Status**: Complete
 
 ### Description
 
@@ -47,7 +47,7 @@ Admin layout, login page, and dashboard.
 
 ## Story 9.2: Content Management Pages
 
-**Status**: Not Started
+**Status**: Complete
 
 ### Description
 
@@ -87,7 +87,7 @@ Browse and edit all content types through the admin UI.
 
 ## Story 9.3: Report Triage UI
 
-**Status**: Not Started
+**Status**: Complete
 
 ### Description
 
@@ -126,7 +126,7 @@ Report queue for reviewing and triaging player bug reports.
 
 ## Story 9.4: User & Character Management
 
-**Status**: Not Started
+**Status**: Complete
 
 ### Description
 

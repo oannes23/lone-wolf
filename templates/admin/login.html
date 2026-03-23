@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login{% endblock %}
+
+{% block body %}
+  <main>
+    <section class="auth-container">
+      <h1>Admin Login</h1>
+      <p class="auth-flavor"><em>Restricted access — administrators only</em></p>
+
+      {% if error %}
+      <div class="alert alert-error" role="alert">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/admin/ui/login">
+        <label for="username">Username</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          autocomplete="username"
+          required
+          autofocus>
+
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          autocomplete="current-password"
+          required>
+
+        <button type="submit">Log In</button>
+      </form>
+    </section>
+  </main>
+{% endblock %}

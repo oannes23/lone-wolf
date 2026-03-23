@@ -1,0 +1,104 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Character Events{% endblock %}
+
+{% block content %}
+  <h1>Character Events</h1>
+
+  <section class="admin-filters">
+    <form method="get" action="/admin/ui/events">
+      <div class="filter-row">
+        <label for="filter-character-id">
+          Character ID
+          <input
+            id="filter-character-id"
+            type="text"
+            name="character_id"
+            value="{{ filter_character_id }}"
+            placeholder="e.g. 1"
+          >
+        </label>
+        <label for="filter-event-type">
+          Event Type
+          <input
+            id="filter-event-type"
+            type="text"
+            name="event_type"
+            value="{{ filter_event_type }}"
+            placeholder="e.g. combat_start"
+          >
+        </label>
+        <label for="filter-scene-id">
+          Scene ID
+          <input
+            id="filter-scene-id"
+            type="text"
+            name="scene_id"
+            value="{{ filter_scene_id }}"
+            placeholder="e.g. 7"
+          >
+        </label>
+        <button type="submit">Filter</button>
+        <a href="/admin/ui/events" role="button" class="secondary">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <p class="muted-note">
+      Showing {{ events | length }} of {{ total }} event(s)
+      {% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
+    </p>
+
+    {% if events %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Seq</th>
+            <th>Event Type</th>
+            <th>Phase</th>
+            <th>Scene ID</th>
+            <th>Character ID</th>
+            <th>Details</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+          <tr>
+            <td>{{ event.seq }}</td>
+            <td><code>{{ event.event_type }}</code></td>
+            <td>{{ event.phase if event.phase else "—" }}</td>
+            <td>{{ event.scene_id }}</td>
+            <td>{{ event.character_id }}</td>
+            <td class="details-cell">
+              {% if event.details %}
+                {{ event.details[:80] }}{% if event.details | length > 80 %}&hellip;{% endif %}
+              {% else %}
+                <span class="muted-note">—</span>
+              {% endif %}
+            </td>
+            <td>{{ event.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <nav class="pagination" aria-label="Event list pages">
+      {% if page > 1 %}
+        <a href="?character_id={{ filter_character_id }}&event_type={{ filter_event_type }}&scene_id={{ filter_scene_id }}&page={{ page - 1 }}">&larr; Previous</a>
+      {% endif %}
+      {% if page < total_pages %}
+        <a href="?character_id={{ filter_character_id }}&event_type={{ filter_event_type }}&scene_id={{ filter_scene_id }}&page={{ page + 1 }}">Next &rarr;</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <p class="muted-note">No events match the current filters.</p>
+    {% endif %}
+  </section>
+{% endblock %}

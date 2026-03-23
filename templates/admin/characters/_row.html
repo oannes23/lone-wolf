@@ -1,0 +1,21 @@
+<td>{{ char.id }}</td>
+<td>{{ char.name }}</td>
+<td>{{ username }}</td>
+<td>{{ book_title }}</td>
+<td>{{ "Yes" if char.is_alive else "No" }}</td>
+<td>{{ "Yes" if char.is_deleted else "No" }}</td>
+<td>{{ char.version }}</td>
+<td>
+  {% if char.is_deleted %}
+  <button
+    hx-post="/admin/ui/characters/{{ char.id }}/restore"
+    hx-target="#char-row-{{ char.id }}"
+    hx-swap="innerHTML"
+    class="secondary small"
+  >
+    Restore
+  </button>
+  {% else %}
+  <span class="muted-note">Active</span>
+  {% endif %}
+</td>

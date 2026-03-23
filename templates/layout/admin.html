@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{% block admin_title %}Admin{% endblock %}{% endblock %}
+
+{% block body %}
+  <div class="admin-layout">
+    <!-- Mobile navigation (hamburger) -->
+    <nav class="admin-nav">
+      <div class="nav-mobile">
+        <details>
+          <summary>
+            <strong>Admin</strong>
+            <span aria-hidden="true">&#9776;</span>
+          </summary>
+          <ul>
+            <li><a href="/admin/ui/dashboard">Dashboard</a></li>
+            <li><a href="/admin/ui/content">Content</a></li>
+            <li><a href="/admin/ui/reports">Reports</a></li>
+            <li><a href="/admin/ui/users">Users</a></li>
+            <li><hr></li>
+            <li><a href="/admin/ui/logout">Log Out</a></li>
+            <li>
+              <button
+                class="theme-toggle"
+                onclick="toggleTheme()"
+                aria-label="Switch to light mode">
+                Light
+              </button>
+            </li>
+          </ul>
+        </details>
+      </div>
+
+      <!-- Desktop navigation -->
+      <div class="nav-desktop">
+        <ul>
+          <li><strong><a href="/admin/ui/dashboard">Lone Wolf Admin</a></strong></li>
+        </ul>
+        <ul>
+          <li><a href="/admin/ui/dashboard">Dashboard</a></li>
+          <li><a href="/admin/ui/content">Content</a></li>
+          <li><a href="/admin/ui/reports">Reports</a></li>
+          <li><a href="/admin/ui/users">Users</a></li>
+          {% if admin %}<li><span class="nav-account">{{ admin.username }}</span></li>{% endif %}
+          <li><a href="/admin/ui/logout" class="nav-account">Log Out</a></li>
+          <li>
+            <button
+              class="theme-toggle"
+              onclick="toggleTheme()"
+              aria-label="Switch to light mode">
+              Light
+            </button>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}

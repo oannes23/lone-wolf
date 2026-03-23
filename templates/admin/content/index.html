@@ -1,0 +1,24 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Content Management{% endblock %}
+
+{% block content %}
+  <h1>Content Management</h1>
+  <p class="muted-note">Browse and edit all game content types.</p>
+
+  <div class="admin-dashboard-grid">
+    {% for rt in resource_types %}
+    <article class="admin-card">
+      <h2 class="admin-card-title">{{ rt.display_name }}</h2>
+      <p>
+        <a href="/admin/ui/content/{{ rt.slug }}" class="admin-card-link">Browse</a>
+        {% if not rt.read_only %}
+        &mdash; <a href="/admin/ui/content/{{ rt.slug }}/new" class="admin-card-link">New</a>
+        {% else %}
+        <span class="muted-note" style="font-size:0.8em">(read-only)</span>
+        {% endif %}
+      </p>
+    </article>
+    {% endfor %}
+  </div>
+{% endblock %}

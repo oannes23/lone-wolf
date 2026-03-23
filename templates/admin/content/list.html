@@ -1,0 +1,115 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}{{ config.display_name }} — Admin{% endblock %}
+
+{% block content %}
+  <header style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+    <h1 style="margin:0;">{{ config.display_name }}</h1>
+    {% if not config.read_only %}
+    <a href="/admin/ui/content/{{ resource_type }}/new" role="button">+ New</a>
+    {% endif %}
+  </header>
+
+  <p><a href="/admin/ui/content">&larr; All content types</a></p>
+
+  {# Filter form — only shown when there are filterable fields #}
+  {% if config.filters %}
+  <form method="get" action="/admin/ui/content/{{ resource_type }}" style="margin-bottom:1.5rem;">
+    <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:flex-end;">
+      {% for param, label in config.filters %}
+      <label style="flex:1; min-width:10rem;">
+        {{ label }}
+        <input
+          type="text"
+          name="{{ param }}"
+          value="{{ filter_values.get(param, '') }}"
+          placeholder="Filter by {{ label | lower }}"
+          style="margin-top:0.25rem;"
+        >
+      </label>
+      {% endfor %}
+      <button type="submit" style="align-self:flex-end;">Filter</button>
+      <a href="/admin/ui/content/{{ resource_type }}" role="button" class="secondary" style="align-self:flex-end;">Clear</a>
+    </div>
+  </form>
+  {% endif %}
+
+  <p style="color:var(--pico-muted-color); font-size:0.9rem;">
+    {% if total == 0 %}
+      No records found.
+    {% else %}
+      Showing {{ start_num }}&ndash;{{ end_num }} of {{ total }}
+    {% endif %}
+  </p>
+
+  {% if items %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          {% for field, heading in config.columns %}
+          <th>{{ heading }}</th>
+          {% endfor %}
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr
+          style="cursor:pointer;"
+          onclick="window.location='/admin/ui/content/{{ resource_type }}/{{ item.id }}'"
+        >
+          {% for field, heading in config.columns %}
+          <td>
+            {% set val = item[field] if item is mapping else item.__dict__.get(field) %}
+            {% if field == "source" and val %}
+              <mark class="source-badge source-badge-{{ val }}">{{ val }}</mark>
+            {% elif val is sameas true %}
+              Yes
+            {% elif val is sameas false %}
+              No
+            {% elif val is none %}
+              <span class="muted-note">&mdash;</span>
+            {% elif val is string %}
+              {{ val | truncate(40) }}
+            {% else %}
+              {{ val }}
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td>
+            <a
+              href="/admin/ui/content/{{ resource_type }}/{{ item.id }}"
+              onclick="event.stopPropagation();"
+            >Edit</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted-note">No {{ config.display_name | lower }} found.</p>
+  {% endif %}
+
+  {# Pagination controls #}
+  {% if total_pages > 1 %}
+  <nav aria-label="Pagination" style="display:flex; gap:1rem; align-items:center; margin-top:1.5rem;">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}{% for k, v in filter_values.items() %}&{{ k }}={{ v }}{% endfor %}">&larr; Previous</a>
+    {% else %}
+    <span style="color:var(--pico-muted-color);">&larr; Previous</span>
+    {% endif %}
+
+    <span style="color:var(--pico-muted-color); font-size:0.9rem;">
+      Page {{ page }} of {{ total_pages }}
+    </span>
+
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}{% for k, v in filter_values.items() %}&{{ k }}={{ v }}{% endfor %}">Next &rarr;</a>
+    {% else %}
+    <span style="color:var(--pico-muted-color);">Next &rarr;</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+{% endblock %}

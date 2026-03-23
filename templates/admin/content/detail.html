@@ -1,0 +1,106 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}
+  {% if is_new %}New {{ config.display_name }}{% else %}{{ config.display_name }} #{{ item.id }}{% endif %} — Admin
+{% endblock %}
+
+{% block content %}
+  <header style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+    <h1 style="margin:0;">
+      {% if is_new %}
+        New {{ config.display_name }}
+      {% else %}
+        {{ config.display_name }} #{{ item.id }}
+        {% if config.has_source and item %}
+          {% set src = item.__dict__.get("source") %}
+          {% if src %}
+            <mark class="source-badge source-badge-{{ src }}">{{ src }}</mark>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </h1>
+  </header>
+
+  <p><a href="/admin/ui/content/{{ resource_type }}">&larr; Back to {{ config.display_name }}</a></p>
+
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if config.read_only %}
+  {# Read-only view — show field values without a form #}
+  <article>
+    <dl>
+      {% for field in fields %}
+      <dt>{{ field.label }}</dt>
+      <dd>
+        {% set val = item.__dict__.get(field.name) %}
+        {% if val is sameas true %}Yes
+        {% elif val is sameas false %}No
+        {% elif val is none %}<span class="muted-note">&mdash;</span>
+        {% else %}{{ val }}
+        {% endif %}
+      </dd>
+      {% endfor %}
+    </dl>
+  </article>
+  {% else %}
+  <form method="post" action="/admin/ui/content/{{ resource_type }}{% if not is_new %}/{{ item.id }}{% else %}/new{% endif %}">
+    {% for field in fields %}
+    <label>
+      {{ field.label }}
+      {% if field.type == "textarea" %}
+      <textarea
+        name="{{ field.name }}"
+        rows="6"
+        {% if field.name == "narrative" %}style="font-family:monospace; font-size:0.9rem;"{% endif %}
+      >{% if item and item.__dict__.get(field.name) is not none %}{{ item.__dict__.get(field.name) }}{% endif %}</textarea>
+      {% elif field.type == "json" %}
+      <textarea
+        name="{{ field.name }}"
+        rows="4"
+        style="font-family:monospace; font-size:0.9rem;"
+      >{% if item and item.__dict__.get(field.name) is not none %}{{ item.__dict__.get(field.name) }}{% endif %}</textarea>
+      {% elif field.type == "checkbox" %}
+      <input
+        type="checkbox"
+        name="{{ field.name }}"
+        value="1"
+        {% if item and item.__dict__.get(field.name) %}checked{% endif %}
+      >
+      {% elif field.type == "number" %}
+      <input
+        type="number"
+        name="{{ field.name }}"
+        value="{% if item and item.__dict__.get(field.name) is not none %}{{ item.__dict__.get(field.name) }}{% endif %}"
+      >
+      {% else %}
+      <input
+        type="text"
+        name="{{ field.name }}"
+        value="{% if item and item.__dict__.get(field.name) is not none %}{{ item.__dict__.get(field.name) }}{% endif %}"
+      >
+      {% endif %}
+    </label>
+    {% endfor %}
+
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1.5rem;">
+      <button type="submit">Save</button>
+      <a href="/admin/ui/content/{{ resource_type }}" role="button" class="secondary">Cancel</a>
+    </div>
+  </form>
+
+  {% if not is_new %}
+  <hr style="margin-block:2rem;">
+  <form
+    method="post"
+    action="/admin/ui/content/{{ resource_type }}/{{ item.id }}/delete"
+    onsubmit="return confirm('Delete this {{ config.display_name | lower }}? This cannot be undone.');"
+  >
+    <button type="submit" class="secondary" style="color:var(--pico-del-color); border-color:var(--pico-del-color);">
+      Delete
+    </button>
+  </form>
+  {% endif %}
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}Report #{{ report.id if report else '?' }}{% endblock %}
+
+{% block content %}
+  <nav aria-label="Breadcrumb">
+    <a href="/admin/ui/reports">&larr; Back to report queue</a>
+  </nav>
+
+  {% if error and not report %}
+    <h1>Report Not Found</h1>
+    <p class="error-message">{{ error }}</p>
+  {% elif report %}
+    <h1>Report #{{ report.id }}</h1>
+
+    {% if error %}
+    <div class="alert alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="alert alert-success" role="status">{{ success }}</div>
+    {% endif %}
+
+    <section>
+      <h2>Report Details</h2>
+      <dl class="report-details">
+        <dt>ID</dt>
+        <dd>{{ report.id }}</dd>
+
+        <dt>Status</dt>
+        <dd>
+          <span class="status-badge status-badge-{{ report.status }}">{{ report.status }}</span>
+        </dd>
+
+        <dt>User ID</dt>
+        <dd>{{ report.user_id }}</dd>
+
+        <dt>Character ID</dt>
+        <dd>{{ report.character_id if report.character_id else '—' }}</dd>
+
+        <dt>Scene ID</dt>
+        <dd>{{ report.scene_id if report.scene_id else '—' }}</dd>
+
+        <dt>Tags</dt>
+        <dd>
+          {% for tag in tags %}
+            <span class="tag-badge">{{ tag }}</span>
+          {% else %}
+            <span class="muted-note">(none)</span>
+          {% endfor %}
+        </dd>
+
+        {% if report.free_text %}
+        <dt>Player Note</dt>
+        <dd>{{ report.free_text }}</dd>
+        {% endif %}
+
+        <dt>Created</dt>
+        <dd>{{ report.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</dd>
+
+        <dt>Updated</dt>
+        <dd>{{ report.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC") if report.updated_at else '—' }}</dd>
+
+        {% if report.resolved_by %}
+        <dt>Resolved By</dt>
+        <dd>Admin #{{ report.resolved_by }}</dd>
+        {% endif %}
+
+        {% if report.admin_notes %}
+        <dt>Admin Notes</dt>
+        <dd>{{ report.admin_notes }}</dd>
+        {% endif %}
+      </dl>
+    </section>
+
+    {% if scene %}
+    <section>
+      <h2>Linked Scene — #{{ scene.number }}</h2>
+      <article class="scene-snippet">
+        <p class="scene-narrative">{{ scene.narrative }}</p>
+      </article>
+    </section>
+    {% endif %}
+
+    <section>
+      <h2>Triage</h2>
+      <form method="post" action="/admin/ui/reports/{{ report.id }}">
+        <label for="status-select">
+          Status
+          <select id="status-select" name="status" required>
+            {% for s in valid_statuses %}
+            <option value="{{ s }}" {% if s == report.status %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label for="admin-notes">
+          Admin Notes
+          <textarea
+            id="admin-notes"
+            name="admin_notes"
+            rows="4"
+            placeholder="Internal notes for this report…"
+          >{{ report.admin_notes if report.admin_notes else '' }}</textarea>
+        </label>
+
+        <button type="submit">Save</button>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}

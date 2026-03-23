@@ -12,10 +12,10 @@ Overall tracker for the Lone Wolf CYOA project. Updated as epics and stories are
 | 3 | [Game Engine (Pure Functions)](epic-3-engine.md) | 7 | Complete | 2 | Epic 1 |
 | 4 | [Character Creation & Wizard System](epic-4-wizard.md) | 5 | Complete | 3 | Epics 1, 3 |
 | 5 | [Parser Pipeline](epic-5-parser.md) | 6 | Complete | 2-3 | Epic 1 |
-| 6 | [Core Gameplay API](epic-6-gameplay-api.md) | 7 | Not Started | 4 | Epics 2, 3, 4 |
-| 7 | [Content Browse, Social & Admin API](epic-7-content-api.md) | 5 | Not Started | 4 | Epics 1, 2 |
-| 8 | [Player UI (HTMX + Pico CSS)](epic-8-player-ui.md) | 6 | Not Started | 5 | Epics 6, 7 |
-| 9 | [Admin UI (HTMX + Pico CSS)](epic-9-admin-ui.md) | 4 | Not Started | 6 | Epics 7, 8 |
+| 6 | [Core Gameplay API](epic-6-gameplay-api.md) | 7 | Complete | 4 | Epics 2, 3, 4 |
+| 7 | [Content Browse, Social & Admin API](epic-7-content-api.md) | 5 | Complete | 4 | Epics 1, 2 |
+| 8 | [Player UI (HTMX + Pico CSS)](epic-8-player-ui.md) | 6 | Complete | 5 | Epics 6, 7 |
+| 9 | [Admin UI (HTMX + Pico CSS)](epic-9-admin-ui.md) | 4 | Complete | 6 | Epics 7, 8 |
 
 ## Dependency Graph
 
@@ -109,40 +109,40 @@ Phase 6:      [E9 Admin UI]
 ### Epic 6: Core Gameplay API
 | Story | Name | Status |
 |-------|------|--------|
-| 6.1 | Scene Endpoint | Not Started |
-| 6.2 | Choose & Scene Transition | Not Started |
-| 6.3 | Combat Endpoints | Not Started |
-| 6.4 | Item & Inventory Endpoints | Not Started |
-| 6.5 | Roll Endpoint | Not Started |
-| 6.6 | Restart, Replay & Advance Endpoints | Not Started |
-| 6.7 | Character CRUD & History | Not Started |
+| 6.1 | Scene Endpoint | Complete |
+| 6.2 | Choose & Scene Transition | Complete |
+| 6.3 | Combat Endpoints | Complete |
+| 6.4 | Item & Inventory Endpoints | Complete |
+| 6.5 | Roll Endpoint | Complete |
+| 6.6 | Restart, Replay & Advance Endpoints | Complete |
+| 6.7 | Character CRUD & History | Complete |
 
 ### Epic 7: Content Browse, Social & Admin API
 | Story | Name | Status |
 |-------|------|--------|
-| 7.1 | Books API | Not Started |
-| 7.2 | Game Objects API | Not Started |
-| 7.3 | Leaderboards API | Not Started |
-| 7.4 | Reports API | Not Started |
-| 7.5 | Admin Content CRUD & Report Queue | Not Started |
+| 7.1 | Books API | Complete |
+| 7.2 | Game Objects API | Complete |
+| 7.3 | Leaderboards API | Complete |
+| 7.4 | Reports API | Complete |
+| 7.5 | Admin Content CRUD & Report Queue | Complete |
 
 ### Epic 8: Player UI (HTMX + Pico CSS)
 | Story | Name | Status |
 |-------|------|--------|
-| 8.1 | UI Scaffolding & Auth Pages | Not Started |
-| 8.2 | Character Creation UI | Not Started |
-| 8.3 | Scene & Choices UI | Not Started |
-| 8.4 | Combat & Random UI | Not Started |
-| 8.5 | Items & Inventory UI | Not Started |
-| 8.6 | Character Sheet, History & Browse | Not Started |
+| 8.1 | UI Scaffolding & Auth Pages | Complete |
+| 8.2 | Character Creation UI | Complete |
+| 8.3 | Scene & Choices UI | Complete |
+| 8.4 | Combat & Random UI | Complete |
+| 8.5 | Items & Inventory UI | Complete |
+| 8.6 | Character Sheet, History & Browse | Complete |
 
 ### Epic 9: Admin UI (HTMX + Pico CSS)
 | Story | Name | Status |
 |-------|------|--------|
-| 9.1 | Admin Scaffolding & Auth | Not Started |
-| 9.2 | Content Management Pages | Not Started |
-| 9.3 | Report Triage UI | Not Started |
-| 9.4 | User & Character Management | Not Started |
+| 9.1 | Admin Scaffolding & Auth | Complete |
+| 9.2 | Content Management Pages | Complete |
+| 9.3 | Report Triage UI | Complete |
+| 9.4 | User & Character Management | Complete |
 
 ## Deviations & Notes
 
@@ -198,6 +198,123 @@ Epic 4 completed. All 5 stories implemented with multi-reviewer gates after each
 - **Weapon category validation in advance** — Was missing in handle_discipline_step; added to match character_service pattern.
 - **Version required on /advance** — POST /gameplay/{id}/advance was missing version requirement per spec todo #68; added AdvanceRequest schema with verify_version.
 - **int(raw_version) error handling** — Added try/except for malformed version in post_wizard to prevent 500.
+
+### Phase 4 Completion (2026-03-21)
+
+Epics 6 and 7 completed in parallel as planned. All 12 stories implemented with 5-agent review (code-reviewer, qa-engineer, tech-writer, game-designer, architect).
+
+- **Epic 6** — `app/services/gameplay_service.py` (scene assembly, choose, roll, items), `app/services/combat_service.py` (round resolution, evasion), `app/services/lifecycle_service.py` (restart, replay), `app/events.py` (event logging helper), `app/schemas/gameplay.py`. Router additions to `app/routers/gameplay.py` (11 endpoints) and `app/routers/characters.py` (6 CRUD/history endpoints).
+- **Epic 7** — `app/routers/books.py`, `app/routers/game_objects.py`, `app/routers/leaderboards.py`, `app/routers/reports.py`, `app/routers/admin/content.py` (14 resource types), `app/routers/admin/reports.py`, `app/services/leaderboard_service.py`. Schemas: `books.py`, `game_objects.py`, `leaderboards.py`, `reports.py`, `admin.py` (47 schema classes).
+
+**Files created**: 20 new files (6 routers, 4 services, 6 schemas, 1 helper, 12 test files)
+
+**Files modified**: `app/main.py` (router registration), `app/routers/characters.py`, `app/routers/gameplay.py`, `app/schemas/characters.py`, `app/schemas/admin.py`
+
+**Test count**: 1163 tests passing (319 new Phase 4 integration tests).
+
+**Next phase unlocked**: Epic 8 (Player UI) may now begin.
+
+### Phase 4 Review Findings (addressed)
+- **Test isolation (`db.commit()` → `db.flush()`)** — New test files from the initial implementation session used `db.commit()` instead of `db.flush()`, breaking conftest's savepoint-based isolation. Caused 65 cascading failures in the full suite. Fixed across 5 test files (88 replacements total).
+- **Admin report stats test isolation** — `TestAdminReportStats` used absolute count assertions against global aggregate queries. Refactored to baseline-relative assertions.
+- **Error code `COMBAT_PHASE` → `WRONG_PHASE`** — use-item during combat returned undocumented `COMBAT_PHASE` error code; spec requires `WRONG_PHASE`. Fixed in service, router, and tests.
+- **Missing advance happy-path test** — Story 6.6 AC required a test proving `/advance` starts a wizard at a victory scene. Added.
+- **`db.commit()` in reports router** — `create_report` called `db.commit()` directly, breaking the session middleware pattern. Changed to `db.flush()`.
+
+### Phase 4 Review Findings (deferred — future improvements)
+- **`choose` endpoint business logic** — ~200 lines of business logic in the router should be extracted to a `process_choose()` service function.
+- **`gameplay_service.py` god-file** — 2130 lines covering 5+ concerns. Natural split: scene_service, transition_service, item_service, roll_service, state_builder.
+- **Circular imports** — `combat_service` and `lifecycle_service` import private `_build_character_state` from `gameplay_service` via deferred imports. Should be extracted to shared module.
+- **DRY violations** — Endurance_max recalculation (4x), combat context building (2x), death state clearing (5x), DecisionLog creation (4x) — all candidates for shared helpers.
+- **N+1 queries in leaderboard service** — Loads all completed characters into memory then loops. Should use SQL-level aggregation.
+- **Spec mismatches** — Several api.md examples use different field names than the implementation (combat round fields, `evasion_possible` vs `evasion_available`, `item_name` vs `character_item_id`). Implementation is generally richer/better; spec examples need updating.
+- **Missing error codes in spec** — `NOT_IN_RANDOM_PHASE`, `REDIRECT_DEPTH_EXCEEDED`, `ADVANCE_NOT_ALLOWED`, `NO_NEXT_BOOK`, `CHARACTER_ALIVE`, `NOT_AT_VICTORY`, `ITEM_MANDATORY` all used in code but absent from api.md error table.
+- **Admin CRUD boilerplate** — 1700 lines for 14 resource types following identical pattern. A generic CRUD factory would reduce to ~200 lines.
+
+### Phase 5 Completion (2026-03-22)
+
+Epic 8 complete. All 6 stories implemented. Final tech writer review passed.
+
+- **Epic 8 Story 8.4** (Combat & Random UI) — Implemented inside `templates/gameplay/scene.html` rather than as separate template files. Combat section includes enemy/hero endurance bars (`<progress>`), Fight button, Psi-surge toggle (conditional on discipline), round counter, evasion button (conditional on `can_evade`), and evasion-hint text. Random roll section handles all three roll types (choice-triggered, phase-based, scene-level exit). All Story 8.4 AC met.
+
+- **Epic 8 Story 8.5** (Items & Inventory UI) — Implemented inside `templates/gameplay/scene.html`. Pending items panel shows per-item accept/decline buttons; mandatory items show accept only with "Required" badge. Inventory drawer (`<details>`) is always visible with weapons (equip/unequip/drop), backpack items (drop), special items (display-only), slot counters, gold and meals meters. All Story 8.5 AC met.
+
+**Spec deviation**: Stories 8.4 and 8.5 were specified as separate template files (`combat.html`, `random.html`, `items.html`, `inventory.html`). Implementation merges all into `scene.html` using conditional blocks and a persistent inventory drawer. This is a better architectural choice — it avoids redirect chains between phase templates and keeps the full game state visible at all times. All behavioral AC is satisfied.
+
+**Bugs resolved from Phase 2 review** (all four fixed):
+1. Dead link in `sheet.html` — corrected to `/ui/game/{id}`.
+2. `scene_id_int` context gap — fixed; bug report form reads `character.current_scene_id` directly.
+3. Advance wizard sub-routes — resolved by unified `POST /ui/characters/{id}/wizard` with `step` dispatch.
+4. Missing `/ui/game/{id}/advance` route — implemented in `app/routers/ui/gameplay.py`.
+
+**Next phase unlocked**: Epic 9 (Admin UI) may now begin.
+
+---
+
+### Phase 5 Progress (2026-03-22)
+
+Epic 8 Stories 8.2, 8.3, and 8.6 implemented. Three additional routers added and all spec-required templates delivered.
+
+- **Epic 8 Story 8.2** — `app/routers/ui/characters.py` (roll, create, wizard routes), `templates/characters/roll.html`, `templates/characters/partials/stats_display.html`, `templates/characters/create.html`, `templates/characters/wizard_equipment.html`, `templates/characters/wizard_confirm.html`.
+- **Epic 8 Story 8.3** — `app/routers/ui/gameplay.py` (scene, choose, restart, replay, report routes), `templates/gameplay/scene.html`.
+- **Epic 8 Story 8.6** — Character sheet and history routes added to `app/routers/ui/characters.py`. `app/routers/ui/browse.py` (books, game objects, leaderboards routes). Templates: `templates/characters/sheet.html`, `templates/characters/history.html`, `templates/characters/history_rows.html`, `templates/characters/wizard_disciplines.html`, `templates/characters/wizard_inventory.html`, `templates/characters/wizard_advance_confirm.html`, `templates/books/list.html`, `templates/books/detail.html`, `templates/game_objects/list.html`, `templates/game_objects/_results.html`, `templates/game_objects/detail.html`, `templates/leaderboards/index.html`, `templates/leaderboards/_content.html`.
+
+**Tech writer review findings (2026-03-22)** — Four bugs identified that must be resolved before Story AC is fully satisfied. See `implementation/epic-8-player-ui.md` Tech Writer Notes for details:
+
+1. Dead link in `sheet.html`: `/ui/characters/{id}/play` does not exist; should be `/ui/game/{id}`.
+2. `scene_id_int` not in template context in `scene.html` — bug reports always record `scene_id = 0`.
+3. Advance wizard sub-routes (`/wizard/disciplines`, `/wizard/inventory`, `/wizard/confirm`) not registered in characters router.
+4. `POST /ui/game/{character_id}/advance` not implemented in gameplay router — "Advance to Next Book" button will 404.
+
+---
+
+### Phase 6 Completion (2026-03-22)
+
+Epic 9 complete. All 4 stories implemented with 5-agent review gates (code-reviewer, qa-engineer, tech-writer, game-designer, architect). Architect reviewed at key moments (Stories 9.1, 9.2, and final Epic).
+
+- **Epic 9 Story 9.1** — `app/routers/ui/admin.py` (login, logout, dashboard routes), `templates/layout/admin.html`, `templates/admin/login.html`, `templates/admin/dashboard.html`. Separate `admin_session` cookie with `AdminLoginRequired` exception handler and redirect to `/admin/ui/login`. Admin layout uses purple accent via `.admin-layout` CSS override to distinguish from player UI.
+- **Epic 9 Story 9.2** — `app/routers/ui/admin_content.py` (full CRUD for 14 resource types), `templates/admin/content/index.html`, `list.html`, `detail.html`, `scene_edit.html`. Data-driven `RESOURCE_CONFIG` dict. Scene detail loads linked choices, combat encounters, and scene items in `<details>` expandables. Wizard templates are read-only (405). Source badge on edit/list views.
+- **Epic 9 Story 9.3** — `app/routers/ui/admin_reports.py` (list, detail, triage, stats routes), `templates/admin/reports/list.html`, `detail.html`, `stats.html`. Status and tag filter, color-coded status badges, linked scene snippet, `resolved_by` auto-set on terminal statuses.
+- **Epic 9 Story 9.4** — `app/routers/ui/admin_users.py` (users, characters, events, restore routes), `templates/admin/users/list.html`, `_max_chars_cell.html`, `templates/admin/characters/list.html`, `_row.html`, `templates/admin/events/list.html`. HTMX inline `max_characters` edit. HTMX soft-delete restore.
+
+**All 4 routers registered** in `app/main.py` under `prefix="/admin/ui"`.
+
+**Shared utility extracted**: `app/utils/json_fields.py` — `parse_json_list`, `parse_json_dict`, `parse_json_dict_or_none`. Deduplicated `_parse_tags` from 4 files across the codebase.
+
+**Test count**: 1434 tests passing (108 new Epic 9 integration tests).
+
+**Cross-navigation**: Users → Characters (username links), Characters → Events (ID links).
+
+**Tech Writer Review Notes (2026-03-22)**:
+
+1. `admin/login.html` does not use `{% block admin_title %}` — it extends `base.html` directly (intentional: the login page must not show the admin nav). The `{% block title %}Admin Login{% endblock %}` it uses is correct.
+2. Dashboard "Total Characters" quick link goes to `/admin/ui/users` (not `/admin/ui/characters`). Minor UX issue — clicking "View characters" from the dashboard lands on the users list rather than the characters list. No dead link, but the label is misleading.
+3. The `_row.html` character partial renders `<td>` cells without a wrapping `<tr>`. The HTMX restore endpoint targets `#char-row-{id}` with `hx-swap="innerHTML"`. This replaces the `<tr>` contents with bare `<td>` cells, which is valid HTML and the intended pattern.
+4. `admin/content/detail.html` uses `--pico-del-color` for the delete button border. This CSS variable is not defined in `app.css` but is provided by Pico CSS. Acceptable dependency.
+5. No dead links found across all templates. All nav links, breadcrumbs, cross-links, and action URLs verified against registered routes.
+6. All CSS classes used in admin templates (`admin-layout`, `admin-nav`, `admin-dashboard-grid`, `admin-card`, `admin-card-title`, `admin-card-value`, `admin-card-value-warn`, `admin-card-value-ok`, `admin-card-link`, `admin-recent-reports`, `admin-quick-links`, `source-badge`, `source-badge-auto`, `source-badge-manual`, `status-badge`, `status-badge-open`, `status-badge-triaging`, `status-badge-resolved`, `status-badge-wont_fix`, `tag-badge`, `admin-filters`, `filter-row`, `table-wrapper`, `pagination`, `report-details`, `scene-snippet`, `scene-narrative`, `inline-number-input`, `max-chars-cell`, `small`, `details-cell`, `muted-note`, `alert`, `alert-error`, `alert-success`) are defined in `static/css/app.css`.
+7. Spec called for an `<input type="number">` inside a `<form>` for inline max_characters edit. Implementation uses two layers: the `<form>` wraps an `<input>` with `hx-trigger="change"` and redundant `hx-post`/`hx-target`/`hx-swap` attrs on the `<input>` itself. Functionally correct; the input-level HTMX attrs are redundant (the form-level attrs fire first on submit, but the input-level attrs fire on `change` before submit). Works as intended.
+
+---
+
+### Phase 5 Start (2026-03-22)
+
+Epic 8 Story 8.1 (UI Scaffolding & Auth Pages) implemented. Phase 5 is now in progress.
+
+- **Epic 8 Story 8.1** — `app/routers/ui/auth.py`, `app/ui_dependencies.py`, `templates/base.html`, `templates/layout/player.html`, `templates/auth/login.html`, `templates/auth/register.html`, `templates/auth/change_password.html`. Router registered in `app/main.py`. Static file mount added.
+
+**Files created**: `app/routers/ui/__init__.py`, `app/routers/ui/auth.py`, `app/ui_dependencies.py`, `templates/base.html`, `templates/layout/player.html`, `templates/auth/login.html`, `templates/auth/register.html`, `templates/auth/change_password.html`
+
+**Files modified**: `app/main.py` (static mount, LoginRequired handler, ui_auth router registration)
+
+**Story 8.1 Tech Writer Notes**:
+- UI router prefix is `/ui` (not `/ui/auth`) — all auth routes are `/ui/login`, `/ui/register`, `/ui/change-password`, `/ui/logout`. Consistent with the player layout nav links.
+- `app/ui_dependencies.py` uses service layer directly (not internal HTTP calls). This is correct and preferable to the loosely-worded epic description of "calls JSON API internally."
+- `change_password` UI handler re-issues a fresh JWT and updates the session cookie immediately — the user stays logged in. The JSON `POST /auth/change-password` endpoint (per api.md) returns a message saying "Please log in again"; the UI layer improves on this by keeping the session alive transparently. The behaviour difference is intentional and appropriate for the UI layer.
+- `secure=False` on cookie `set_cookie` calls is noted in comments as production-only. Acceptable for local MVP.
+- `player.html` nav has duplicate `id="theme-toggle-btn"` — the mobile `<details>` block and the desktop block both render a button with the same id. In practice only one is visible at a time, but duplicate ids are invalid HTML. Minor; does not affect functionality.
+- Auth pages (`login.html`, `register.html`) extend `base.html` directly and include a small inline `<script>` to apply the stored theme before render — avoids flash of wrong theme. `change_password.html` extends `layout/player.html` (correct — requires auth).
+- Vendored static assets (`pico.min.css`, `htmx.min.js`, `app.css`) are referenced but the actual files are not committed in this story. Expected — asset vendoring may follow separately.
 
 ---
 

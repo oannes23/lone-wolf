@@ -16,11 +16,20 @@ from app.routers.admin import auth as admin_auth
 from app.routers.admin import content as admin_content
 from app.routers.admin import reports as admin_reports
 from app.routers.admin import users as admin_users
+from app.routers.ui import admin as ui_admin
+from app.routers.ui import admin_content as ui_admin_content
+from app.routers.ui import admin_reports as ui_admin_reports
+from app.routers.ui import admin_users as ui_admin_users
 from app.routers.ui import auth as ui_auth
 from app.routers.ui import browse as ui_browse
 from app.routers.ui import characters as ui_characters
 from app.routers.ui import gameplay as ui_gameplay
-from app.ui_dependencies import LoginRequired, login_required_handler
+from app.ui_dependencies import (
+    AdminLoginRequired,
+    LoginRequired,
+    admin_login_required_handler,
+    login_required_handler,
+)
 
 _STATIC_DIR = Path(__file__).parent.parent / "static"
 
@@ -39,6 +48,9 @@ def create_app() -> FastAPI:
 
     # UI auth redirect — converts LoginRequired to 303 → /ui/login
     app.add_exception_handler(LoginRequired, login_required_handler)  # type: ignore[arg-type]
+
+    # Admin UI auth redirect — converts AdminLoginRequired to 303 → /admin/ui/login
+    app.add_exception_handler(AdminLoginRequired, admin_login_required_handler)  # type: ignore[arg-type]
 
     # Version conflict handler — produces a flat JSON body per spec
     @app.exception_handler(VersionConflictError)
@@ -71,6 +83,10 @@ def create_app() -> FastAPI:
     app.include_router(ui_browse.router)
     app.include_router(ui_characters.router)
     app.include_router(ui_gameplay.router)
+    app.include_router(ui_admin.router)
+    app.include_router(ui_admin_content.router)
+    app.include_router(ui_admin_reports.router)
+    app.include_router(ui_admin_users.router)
 
     return app
 

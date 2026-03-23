@@ -1,0 +1,227 @@
+{% extends "layout/admin.html" %}
+
+{% block admin_title %}
+  {% if is_new %}New Scene{% else %}Scene #{{ item.id }} (Book {{ item.book_id }}, #{{ item.number }}){% endif %} — Admin
+{% endblock %}
+
+{% block content %}
+  <header style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
+    <h1 style="margin:0;">
+      {% if is_new %}
+        New Scene
+      {% else %}
+        Scene #{{ item.id }}
+        {% set src = item.__dict__.get("source") %}
+        {% if src %}
+          <mark class="source-badge source-badge-{{ src }}">{{ src }}</mark>
+        {% endif %}
+      {% endif %}
+    </h1>
+  </header>
+
+  <p><a href="/admin/ui/content/scenes">&larr; Back to Scenes</a></p>
+
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/admin/ui/content/scenes{% if not is_new %}/{{ item.id }}{% else %}/new{% endif %}">
+
+    {# Core identifiers #}
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem;">
+      <label>
+        Book ID
+        <input type="number" name="book_id"
+          value="{% if item %}{{ item.book_id }}{% endif %}">
+      </label>
+      <label>
+        Scene Number
+        <input type="number" name="number"
+          value="{% if item %}{{ item.number }}{% endif %}">
+      </label>
+    </div>
+
+    <label>
+      HTML ID
+      <input type="text" name="html_id"
+        value="{% if item %}{{ item.html_id }}{% endif %}">
+    </label>
+
+    {# Narrative — large monospace textarea #}
+    <label>
+      Narrative
+      <textarea
+        name="narrative"
+        rows="12"
+        style="font-family:monospace; font-size:0.9rem; line-height:1.5;"
+      >{% if item %}{{ item.narrative }}{% endif %}</textarea>
+    </label>
+
+    {# Boolean flags #}
+    <fieldset>
+      <legend>Flags</legend>
+      <label>
+        <input type="checkbox" name="is_death" value="1"
+          {% if item and item.is_death %}checked{% endif %}>
+        Is Death Scene
+      </label>
+      <label>
+        <input type="checkbox" name="is_victory" value="1"
+          {% if item and item.is_victory %}checked{% endif %}>
+        Is Victory Scene
+      </label>
+      <label>
+        <input type="checkbox" name="must_eat" value="1"
+          {% if item and item.must_eat %}checked{% endif %}>
+        Must Eat (Meal Required)
+      </label>
+      <label>
+        <input type="checkbox" name="loses_backpack" value="1"
+          {% if item and item.loses_backpack %}checked{% endif %}>
+        Loses Backpack
+      </label>
+    </fieldset>
+
+    {# Optional fields #}
+    <label>
+      Illustration Path
+      <input type="text" name="illustration_path"
+        value="{% if item and item.illustration_path %}{{ item.illustration_path }}{% endif %}">
+    </label>
+
+    <label>
+      Phase Sequence Override
+      <textarea
+        name="phase_sequence_override"
+        rows="3"
+        style="font-family:monospace; font-size:0.9rem;"
+      >{% if item and item.phase_sequence_override %}{{ item.phase_sequence_override }}{% endif %}</textarea>
+    </label>
+
+    <label>
+      Game Object ID (optional)
+      <input type="number" name="game_object_id"
+        value="{% if item and item.game_object_id %}{{ item.game_object_id }}{% endif %}">
+    </label>
+
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1.5rem;">
+      <button type="submit">Save</button>
+      <a href="/admin/ui/content/scenes" role="button" class="secondary">Cancel</a>
+    </div>
+  </form>
+
+  {% if not is_new %}
+  {# Linked content — read-only expandables #}
+  <hr style="margin-block:2rem;">
+  <h2>Linked Content</h2>
+  <p class="muted-note" style="font-size:0.9rem;">Editing linked content happens on each resource's own detail page.</p>
+
+  <details style="margin-bottom:1rem;">
+    <summary>
+      <strong>Choices</strong>
+      <span style="color:var(--pico-muted-color); font-size:0.85em; margin-left:0.5rem;">({{ scene_choices | length }})</span>
+    </summary>
+    {% if scene_choices %}
+    <table style="margin-top:0.75rem;">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Target #</th>
+          <th>Display Text</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for choice in scene_choices %}
+        <tr>
+          <td><a href="/admin/ui/content/choices/{{ choice.id }}">{{ choice.id }}</a></td>
+          <td>{{ choice.target_scene_number }}</td>
+          <td>{{ choice.display_text | truncate(60) }}</td>
+          <td><mark class="source-badge source-badge-{{ choice.source }}">{{ choice.source }}</mark></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted-note" style="margin-top:0.5rem;">No choices linked to this scene.</p>
+    {% endif %}
+  </details>
+
+  <details style="margin-bottom:1rem;">
+    <summary>
+      <strong>Combat Encounters</strong>
+      <span style="color:var(--pico-muted-color); font-size:0.85em; margin-left:0.5rem;">({{ scene_encounters | length }})</span>
+    </summary>
+    {% if scene_encounters %}
+    <table style="margin-top:0.75rem;">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Enemy</th>
+          <th>CS</th>
+          <th>END</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for enc in scene_encounters %}
+        <tr>
+          <td><a href="/admin/ui/content/combat-encounters/{{ enc.id }}">{{ enc.id }}</a></td>
+          <td>{{ enc.enemy_name }}</td>
+          <td>{{ enc.enemy_cs }}</td>
+          <td>{{ enc.enemy_end }}</td>
+          <td><mark class="source-badge source-badge-{{ enc.source }}">{{ enc.source }}</mark></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted-note" style="margin-top:0.5rem;">No combat encounters linked to this scene.</p>
+    {% endif %}
+  </details>
+
+  <details style="margin-bottom:1rem;">
+    <summary>
+      <strong>Scene Items</strong>
+      <span style="color:var(--pico-muted-color); font-size:0.85em; margin-left:0.5rem;">({{ scene_items | length }})</span>
+    </summary>
+    {% if scene_items %}
+    <table style="margin-top:0.75rem;">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Item</th>
+          <th>Type</th>
+          <th>Action</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for si in scene_items %}
+        <tr>
+          <td><a href="/admin/ui/content/scene-items/{{ si.id }}">{{ si.id }}</a></td>
+          <td>{{ si.item_name }}</td>
+          <td>{{ si.item_type }}</td>
+          <td>{{ si.action }}</td>
+          <td><mark class="source-badge source-badge-{{ si.source }}">{{ si.source }}</mark></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted-note" style="margin-top:0.5rem;">No items linked to this scene.</p>
+    {% endif %}
+  </details>
+
+  <hr style="margin-block:2rem;">
+  <form
+    method="post"
+    action="/admin/ui/content/scenes/{{ item.id }}/delete"
+    onsubmit="return confirm('Delete this scene? This cannot be undone.');"
+  >
+    <button type="submit" class="secondary" style="color:var(--pico-del-color); border-color:var(--pico-del-color);">
+      Delete Scene
+    </button>
+  </form>
+  {% endif %}
+{% endblock %}
