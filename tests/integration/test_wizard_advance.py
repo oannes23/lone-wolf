@@ -369,7 +369,7 @@ class TestAdvanceEndpoint:
         # Try again (version has been incremented, but should fail on wizard check before version)
         r2 = client.post(f"/gameplay/{char_id}/advance", json={"version": char_version + 1}, headers=_auth_headers(token))
         assert r2.status_code == 409, r2.json()
-        assert r2.json()["error_code"] == "WIZARD_ALREADY_ACTIVE"
+        assert r2.json()["error_code"] == "WIZARD_ACTIVE"
 
     def test_advance_returns_404_if_no_next_book(
         self, client: TestClient, db: Session

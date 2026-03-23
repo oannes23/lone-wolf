@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.admin import AdminUser
 from app.models.player import Character, User
-from app.services.auth_service import decode_token, verify_token_not_stale
+from app.services.auth_service import decode_token, resolve_user_from_token, verify_token_not_stale
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -37,21 +37,9 @@ async def get_current_user(
             user no longer exists.
     """
     try:
-        payload = decode_token(token, expected_type="access")
+        return resolve_user_from_token(db, token)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    user_id = int(payload["sub"])
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    try:
-        verify_token_not_stale(payload, user.password_changed_at)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    return user
 
 
 async def get_owned_character(

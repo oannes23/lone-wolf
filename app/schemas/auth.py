@@ -3,13 +3,15 @@
 from fastapi import Form
 from pydantic import BaseModel, EmailStr, Field
 
+from app.services.auth_service import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
+
 
 class RegisterRequest(BaseModel):
     """Request body for POST /auth/register."""
 
     username: str
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
 
 class RegisterResponse(BaseModel):
@@ -61,7 +63,7 @@ class ChangePasswordRequest(BaseModel):
     """Request body for POST /auth/change-password."""
 
     current_password: str
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
 
 class MessageResponse(BaseModel):

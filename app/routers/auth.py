@@ -1,10 +1,7 @@
 """Authentication router — register, login, refresh, change-password, me."""
 
-from datetime import UTC, datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,11 +19,12 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_service import (
+    authenticate_user,
+    change_user_password,
     create_access_token,
     create_refresh_token,
     decode_token,
-    hash_password,
-    verify_password,
+    register_user,
     verify_token_not_stale,
 )
 
@@ -56,17 +54,10 @@ def register(
         HTTPException 400: If the username or email is already taken.
         HTTPException 429: If the rate limit is exceeded.
     """
-    user = User(
-        username=body.username,
-        email=body.email,
-        password_hash=hash_password(body.password),
-    )
-    db.add(user)
     try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Username or email already registered") from None
+        user = register_user(db, body.username, body.email, body.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return RegisterResponse(id=user.id, username=user.username, email=user.email)
 
@@ -95,9 +86,10 @@ def login(
         HTTPException 400: If credentials are incorrect.
         HTTPException 429: If the rate limit is exceeded.
     """
-    user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    try:
+        user = authenticate_user(db, form_data.username, form_data.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     access_token = create_access_token(user_id=user.id, username=user.username)
     refresh_token = create_refresh_token(user_id=user.id, username=user.username)
@@ -165,18 +157,11 @@ def change_password(
     Raises:
         HTTPException 400: If the current password is wrong.
     """
-    if not verify_password(body.current_password, current_user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    try:
+        change_user_password(db, current_user, body.current_password, body.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    current_user.password_hash = hash_password(body.new_password)
-    # Set password_changed_at to the next whole second so that:
-    # - Tokens issued at or before the current second (old tokens) are rejected,
-    #   because their integer iat < password_changed_at.
-    # - Tokens issued in the next second or later (new tokens) are accepted,
-    #   because their iat >= password_changed_at.
-    now_trunc = datetime.now(UTC).replace(microsecond=0)
-    current_user.password_changed_at = now_trunc + timedelta(seconds=1)
-    db.flush()
     return MessageResponse(message="Password changed successfully")
 
 

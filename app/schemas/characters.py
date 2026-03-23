@@ -214,3 +214,103 @@ class WizardInventoryRequest(BaseModel):
     keep_weapons: list[str]
     keep_backpack: list[str]
     version: int
+
+
+# ---------------------------------------------------------------------------
+# Character CRUD & History schemas (Story 6.7)
+# ---------------------------------------------------------------------------
+
+
+class CharacterItemInfo(BaseModel):
+    """An item in a character's inventory."""
+
+    character_item_id: int
+    item_name: str
+    item_type: str
+    is_equipped: bool
+
+
+class CharacterDisciplineInfo(BaseModel):
+    """A discipline possessed by a character."""
+
+    name: str
+    weapon_category: str | None
+
+
+class CharacterListItem(BaseModel):
+    """Summary of a character for the list endpoint."""
+
+    id: int
+    name: str
+    book_title: str
+    current_scene_number: int | None
+    is_alive: bool
+    death_count: int
+    current_run: int
+    version: int
+
+
+class CharacterDetailResponse(BaseModel):
+    """Full character sheet response."""
+
+    id: int
+    name: str
+    book_title: str
+    combat_skill_base: int
+    endurance_base: int
+    endurance_max: int
+    endurance_current: int
+    gold: int
+    meals: int
+    is_alive: bool
+    death_count: int
+    current_run: int
+    version: int
+    scene_phase: str | None
+    current_scene_number: int | None
+    items: list[CharacterItemInfo]
+    disciplines: list[CharacterDisciplineInfo]
+    active_wizard: ActiveWizardInfo | None
+
+
+class HistoryEntry(BaseModel):
+    """A single entry in the character's decision log."""
+
+    scene_number: int | None
+    choice_text: str | None
+    target_scene_number: int | None
+    action_type: str
+    run_number: int
+    created_at: str
+
+
+class EventEntry(BaseModel):
+    """A single character event entry."""
+
+    id: int
+    event_type: str
+    details: str | None
+    scene_id: int
+    run_number: int
+    seq: int
+    created_at: str
+
+
+class RunSummary(BaseModel):
+    """Summary of a single run for a character."""
+
+    run_number: int
+    started_at: str | None
+    outcome: str  # "death", "in_progress", "victory"
+    death_scene_number: int | None
+    decision_count: int
+    scenes_visited: int
+
+
+class PaginatedResponse(BaseModel):
+    """A paginated list response."""
+
+    items: list
+    total: int
+    limit: int
+    offset: int
