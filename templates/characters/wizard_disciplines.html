@@ -1,0 +1,62 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Choose Discipline{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>Book Advance</h1>
+      <p>Step {{ wizard.step_index + 1 }} of {{ wizard.total_steps }}: Choose New Discipline</p>
+    </hgroup>
+  </header>
+
+  <section>
+    <h2>Your Current Disciplines</h2>
+    {% if current_disciplines %}
+    <ul>
+      {% for disc in current_disciplines %}
+      <li>{{ disc }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No disciplines yet.</p>
+    {% endif %}
+  </section>
+
+  <form method="post" action="/ui/characters/{{ character_id }}/wizard">
+    <input type="hidden" name="step" value="pick_disciplines">
+    <input type="hidden" name="version" value="{{ version }}">
+
+    <section>
+      <h2>Choose {{ wizard.disciplines_to_pick }} New Discipline{% if wizard.disciplines_to_pick > 1 %}s{% endif %}</h2>
+      <fieldset>
+        {% for disc in wizard.available_disciplines %}
+        <label>
+          <input
+            type="radio"
+            name="discipline_id"
+            value="{{ disc.id }}"
+            required>
+          <strong>{{ disc.name }}</strong>
+          <br>
+          <small>{{ disc.description }}</small>
+        </label>
+        {% endfor %}
+      </fieldset>
+    </section>
+
+    {% if has_weaponskill %}
+    <label for="weapon_skill_type">Weapon Skill Type</label>
+    <select id="weapon_skill_type" name="weapon_skill_type">
+      <option value="">Select a weapon type&hellip;</option>
+      {% for wc in weapon_categories %}
+      <option value="{{ wc }}">{{ wc }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    <button type="submit">Continue</button>
+  </form>
+</article>
+{% endblock %}

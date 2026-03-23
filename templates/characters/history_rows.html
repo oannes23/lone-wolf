@@ -1,0 +1,10 @@
+{% for entry in history %}
+<tr>
+  <td>{{ entry.run_number }}</td>
+  <td>{% if entry.scene_number %}{{ entry.scene_number }}{% else %}&mdash;{% endif %}</td>
+  <td>{% if entry.choice_text %}{{ entry.choice_text }}{% else %}&mdash;{% endif %}</td>
+  <td>{% if entry.target_scene_number %}{{ entry.target_scene_number }}{% else %}&mdash;{% endif %}</td>
+  <td>{{ entry.action_type }}</td>
+  <td>{{ entry.created_at[:19].replace("T", " ") }}</td>
+</tr>
+{% endfor %}

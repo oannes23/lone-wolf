@@ -1,0 +1,25 @@
+{% if objects %}
+<div class="game-object-grid">
+  {% for obj in objects %}
+  <article>
+    <header>
+      <hgroup>
+        <h3><a href="/ui/game-objects/{{ obj.id }}">{{ obj.name }}</a></h3>
+        <p><small>{{ obj.kind | capitalize }}</small></p>
+      </hgroup>
+    </header>
+    {% if obj.aliases %}
+    <p><small>Also known as: {{ obj.aliases | join(", ") }}</small></p>
+    {% endif %}
+    {% if obj.description %}
+    <p>{{ obj.description[:200] }}{% if obj.description | length > 200 %}&hellip;{% endif %}</p>
+    {% endif %}
+    <footer>
+      <a href="/ui/game-objects/{{ obj.id }}" role="button" class="outline">Details</a>
+    </footer>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p>No results found.</p>
+{% endif %}

@@ -1,0 +1,535 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Scene {{ scene.scene_number }}{% endblock %}
+
+{% block content %}
+<div class="scene-container">
+
+  {# -----------------------------------------------------------------------
+     Character stats bar
+  ----------------------------------------------------------------------- #}
+  <div class="stats-bar" role="status" aria-label="Character stats">
+    <span class="stat-item">
+      <abbr title="Combat Skill">CS</abbr>
+      <strong>{{ character.combat_skill_base }}</strong>
+    </span>
+    <span class="stat-item">
+      <abbr title="Endurance">END</abbr>
+      <strong>{{ character.endurance_current }}/{{ character.endurance_max }}</strong>
+    </span>
+    <span class="stat-item">
+      <abbr title="Gold Crowns">Gold</abbr>
+      <strong>{{ character.gold }}</strong>
+    </span>
+    <span class="stat-item">
+      <abbr title="Meals">Meals</abbr>
+      <strong>{{ character.meals }}</strong>
+    </span>
+    <a href="/ui/characters" class="stat-back" aria-label="Back to characters">
+      &#8592; Characters
+    </a>
+  </div>
+
+  {# -----------------------------------------------------------------------
+     Scene header
+  ----------------------------------------------------------------------- #}
+  <header class="scene-header">
+    <h2>Scene {{ scene.scene_number }}</h2>
+  </header>
+
+  {# -----------------------------------------------------------------------
+     Illustration (if present)
+  ----------------------------------------------------------------------- #}
+  {% if scene.illustration_url %}
+  <figure class="scene-illustration">
+    <img
+      src="{{ scene.illustration_url }}"
+      alt="Scene {{ scene.scene_number }} illustration"
+      loading="lazy">
+  </figure>
+  {% endif %}
+
+  {# -----------------------------------------------------------------------
+     Narrative text
+  ----------------------------------------------------------------------- #}
+  {# Trust boundary: narrative HTML originates from the parser pipeline (server-controlled)
+     and admin manual edits. No user-submitted content reaches this field. #}
+  <article class="scene-narrative">
+    {{ scene.narrative | safe }}
+  </article>
+
+  {# -----------------------------------------------------------------------
+     Phase results (automatic phases: eat, heal, item loss, etc.)
+  ----------------------------------------------------------------------- #}
+  {% if scene.phase_results %}
+  <section class="phase-results" aria-label="Automatic phase results">
+    {% for result in scene.phase_results %}
+    <aside class="phase-result phase-result-{{ result.severity }}" role="note">
+      <strong>{{ result.type | replace("_", " ") | title }}</strong>:
+      {{ result.result }}
+    </aside>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {# -----------------------------------------------------------------------
+     Death panel
+  ----------------------------------------------------------------------- #}
+  {% if scene.is_death %}
+  <article class="death-panel" aria-label="Death">
+    <header>
+      <h3>Your adventure ends here.</h3>
+    </header>
+    <p>
+      Lone Wolf has fallen. But every death is a lesson. Restart from the
+      beginning of this book and face your destiny again.
+    </p>
+    <form method="post" action="/ui/game/{{ character.id }}/restart">
+      <input type="hidden" name="version" value="{{ scene.version }}">
+      <button type="submit" class="choice-btn choice-btn-danger">
+        Restart from Book Start
+      </button>
+    </form>
+  </article>
+
+  {# -----------------------------------------------------------------------
+     Victory panel
+  ----------------------------------------------------------------------- #}
+  {% elif scene.is_victory %}
+  <article class="victory-panel" aria-label="Victory">
+    <header>
+      <h3>Victory!</h3>
+    </header>
+    <p>
+      You have completed this book. Will you continue your legend or replay
+      this adventure?
+    </p>
+    <div class="victory-actions">
+      <form method="post" action="/ui/game/{{ character.id }}/advance">
+        <input type="hidden" name="version" value="{{ scene.version }}">
+        <button type="submit" class="choice-btn">
+          Advance to Next Book
+        </button>
+      </form>
+      <form method="post" action="/ui/game/{{ character.id }}/replay">
+        <input type="hidden" name="version" value="{{ scene.version }}">
+        <button type="submit" class="choice-btn choice-btn-secondary">
+          Replay This Book
+        </button>
+      </form>
+    </div>
+  </article>
+
+  {# -----------------------------------------------------------------------
+     Combat phase
+  ----------------------------------------------------------------------- #}
+  {% elif scene.phase == "combat" and scene.combat %}
+  {%- set combat = scene.combat -%}
+  {%- set hero_end_pct = ((combat.hero_end_remaining / character.endurance_max) * 100) | int if character.endurance_max > 0 else 0 -%}
+  {# Check if character has Psi-surge discipline #}
+  {%- set ns = namespace(has_psi_surge=false) -%}
+  {%- for cd in character.disciplines -%}
+    {%- if cd.discipline.name == "Psi-surge" -%}{%- set ns.has_psi_surge = true -%}{%- endif -%}
+  {%- endfor -%}
+
+  <section class="combat-section" aria-label="Combat">
+    <header class="combat-header">
+      <h3 class="combat-title">Combat</h3>
+    </header>
+
+    {# -- Combatants grid -------------------------------------------------- #}
+    <div class="combat-combatants">
+
+      {# Enemy #}
+      <div class="combatant combatant-enemy">
+        <h4 class="combatant-name">{{ combat.enemy_name }}</h4>
+        <dl class="combatant-stats">
+          <div class="stat-row">
+            <dt><abbr title="Combat Skill">CS</abbr></dt>
+            <dd><strong>{{ combat.enemy_cs }}</strong></dd>
+          </div>
+          <div class="stat-row">
+            <dt><abbr title="Endurance">END</abbr></dt>
+            <dd><strong>{{ combat.enemy_end_remaining }}</strong></dd>
+          </div>
+        </dl>
+        <div class="end-bar-wrap" aria-label="Enemy endurance">
+          <progress
+            class="end-bar end-bar-enemy"
+            value="{{ combat.enemy_end_remaining }}"
+            max="{{ combat.enemy_cs }}"
+            aria-valuenow="{{ combat.enemy_end_remaining }}"
+            aria-valuemax="{{ combat.enemy_cs }}"></progress>
+        </div>
+      </div>
+
+      <div class="combat-vs" aria-hidden="true">vs</div>
+
+      {# Hero #}
+      <div class="combatant combatant-hero">
+        <h4 class="combatant-name">Lone Wolf</h4>
+        <dl class="combatant-stats">
+          <div class="stat-row">
+            <dt><abbr title="Effective Combat Skill">CS</abbr></dt>
+            <dd><strong>{{ combat.hero_effective_cs }}</strong></dd>
+          </div>
+          <div class="stat-row">
+            <dt><abbr title="Endurance">END</abbr></dt>
+            <dd><strong>{{ combat.hero_end_remaining }}/{{ character.endurance_max }}</strong></dd>
+          </div>
+        </dl>
+        <div class="end-bar-wrap" aria-label="Your endurance">
+          <progress
+            class="end-bar end-bar-hero{% if hero_end_pct <= 25 %} end-bar-critical{% elif hero_end_pct <= 50 %} end-bar-low{% endif %}"
+            value="{{ combat.hero_end_remaining }}"
+            max="{{ character.endurance_max }}"
+            aria-valuenow="{{ combat.hero_end_remaining }}"
+            aria-valuemax="{{ character.endurance_max }}"></progress>
+        </div>
+      </div>
+
+    </div>{# .combat-combatants #}
+
+    {# -- Round and ratio info --------------------------------------------- #}
+    <p class="combat-round-info">
+      {% if combat.rounds_fought > 0 %}
+      Round <strong>{{ combat.rounds_fought }}</strong> fought.
+      {% else %}
+      Combat begins.
+      {% endif %}
+      Combat ratio: <strong>{% if combat.combat_ratio >= 0 %}+{% endif %}{{ combat.combat_ratio }}</strong>
+    </p>
+
+    {# -- Psi-surge toggle (only if character has the discipline) ----------- #}
+    {% if ns.has_psi_surge %}
+    <div class="psi-surge-toggle">
+      <label class="psi-surge-label">
+        <input type="checkbox" id="psi-surge-check">
+        Activate Psi-surge this round
+        <small class="psi-surge-note">(+4 CS, costs 2 END)</small>
+      </label>
+    </div>
+    {% endif %}
+
+    {# -- Fight button ----------------------------------------------------- #}
+    <form
+      method="post"
+      action="/ui/game/{{ character.id }}/combat/round"
+      class="combat-fight-form"
+      id="combat-fight-form">
+      <input type="hidden" name="version" value="{{ scene.version }}">
+      <input type="hidden" name="use_psi_surge" value="false" id="psi-surge-hidden">
+      <button type="submit" class="combat-fight-btn choice-btn">
+        Fight
+      </button>
+    </form>
+
+    {# -- Evasion button — only shown when can_evade is true --------------- #}
+    {% if combat.can_evade %}
+    <form
+      method="post"
+      action="/ui/game/{{ character.id }}/combat/evasion"
+      class="combat-evade-form">
+      <input type="hidden" name="version" value="{{ scene.version }}">
+      <button type="submit" class="combat-evade-btn choice-btn choice-btn-secondary">
+        Evade
+      </button>
+    </form>
+    {% elif combat.evasion_available and combat.evasion_after_rounds %}
+    <p class="evasion-hint muted-note">
+      Evasion available after {{ combat.evasion_after_rounds }} round(s)
+      ({{ combat.evasion_after_rounds - combat.rounds_fought }} more to go).
+    </p>
+    {% endif %}
+
+  </section>
+
+  {# Psi-surge JS: wire checkbox to hidden form field #}
+  {% if ns.has_psi_surge %}
+  <script>
+    (function () {
+      var check = document.getElementById('psi-surge-check');
+      var hidden = document.getElementById('psi-surge-hidden');
+      if (check && hidden) {
+        check.addEventListener('change', function () {
+          hidden.value = check.checked ? 'true' : 'false';
+        });
+      }
+    })();
+  </script>
+  {% endif %}
+
+  {# -----------------------------------------------------------------------
+     Random roll phase
+  ----------------------------------------------------------------------- #}
+  {% elif scene.phase == "random" or character.pending_choice_id %}
+  <section class="roll-section" aria-label="Random roll required">
+    <h3 class="roll-heading">Random Roll</h3>
+
+    {# Choice-triggered random: identify the pending choice text #}
+    {% if character.pending_choice_id and scene.choices %}
+      {% for choice in scene.choices %}
+        {% if choice.id == character.pending_choice_id and choice.has_random_outcomes %}
+        <p class="roll-description">
+          Your choice of <em>{{ choice.text }}</em> requires a random roll.
+        </p>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+
+    {# Phase-based random: informational text #}
+    {% if scene.phase == "random" and not character.pending_choice_id %}
+    <p class="roll-description">
+      The outcome of this section is determined by a random roll.
+    </p>
+    {% endif %}
+
+    {# Roll button #}
+    <form
+      method="post"
+      action="/ui/game/{{ character.id }}/roll"
+      class="roll-form">
+      <input type="hidden" name="version" value="{{ scene.version }}">
+      <button type="submit" class="roll-btn choice-btn">
+        Roll
+      </button>
+    </form>
+
+  </section>
+
+  {# -----------------------------------------------------------------------
+     Items phase — pending items panel (Story 8.5)
+  ----------------------------------------------------------------------- #}
+  {% elif scene.pending_items %}
+  <section class="items-section" aria-label="Pending items">
+    <h3 class="items-heading">Items Found</h3>
+    <p class="items-intro muted-note">
+      Resolve
+      {% if scene.pending_items | length == 1 %}this item{% else %}all {{ scene.pending_items | length }} items{% endif %}
+      before continuing your adventure.
+    </p>
+    {% for item in scene.pending_items %}
+    <article class="pending-item-card" aria-label="{{ item.item_name }}">
+      <div class="pending-item-info">
+        <strong class="pending-item-name">{{ item.item_name }}</strong>
+        <span class="pending-item-type">{{ item.item_type | replace("_", " ") | title }}</span>
+        {% if item.is_mandatory %}
+        <span class="item-badge item-badge-required" aria-label="Required item">Required</span>
+        {% endif %}
+      </div>
+      <div class="pending-item-actions">
+        <form method="post" action="/ui/game/{{ character.id }}/item/accept">
+          <input type="hidden" name="scene_item_id" value="{{ item.id }}">
+          <input type="hidden" name="version" value="{{ scene.version }}">
+          <button type="submit" class="item-action-btn item-action-accept">
+            Accept
+          </button>
+        </form>
+        {% if not item.is_mandatory %}
+        <form method="post" action="/ui/game/{{ character.id }}/item/decline">
+          <input type="hidden" name="scene_item_id" value="{{ item.id }}">
+          <input type="hidden" name="version" value="{{ scene.version }}">
+          <button type="submit" class="item-action-btn item-action-decline">
+            Decline
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+
+  {# -----------------------------------------------------------------------
+     Choices section (normal gameplay)
+  ----------------------------------------------------------------------- #}
+  {% elif scene.choices %}
+  <section class="choices-section" aria-label="Available choices">
+    <h3 class="choices-heading">What do you do?</h3>
+    {% for choice in scene.choices %}
+      {% if choice.available %}
+      <form
+        method="post"
+        action="/ui/game/{{ character.id }}/choose">
+        <input type="hidden" name="choice_id" value="{{ choice.id }}">
+        <input type="hidden" name="version" value="{{ scene.version }}">
+        <button type="submit" class="choice-btn">
+          {{ choice.text }}
+          {% if choice.has_random_outcomes %}
+          <span class="roll-indicator" aria-label="Requires roll">(Roll)</span>
+          {% endif %}
+        </button>
+      </form>
+      {% else %}
+      <button
+        type="button"
+        class="choice-btn choice-btn-unavailable"
+        disabled
+        aria-disabled="true"
+        title="{{ choice.unavailability_reason or 'Not available' }}">
+        {{ choice.text }}
+        {% if choice.condition %}
+        <span class="condition-label">
+          Requires: {{ choice.condition.type | replace("_", " ") | title }}
+          {% if choice.condition.value %} ({{ choice.condition.value }}){% endif %}
+        </span>
+        {% else %}
+        <span class="condition-label">Not available</span>
+        {% endif %}
+      </button>
+      {% endif %}
+    {% endfor %}
+  </section>
+
+  {% else %}
+  <section class="choices-section" aria-label="No choices">
+    <p class="muted-note">No choices available at this scene.</p>
+  </section>
+  {% endif %}
+
+  {# -----------------------------------------------------------------------
+     Inventory drawer — always visible so players can manage items at any phase
+  ----------------------------------------------------------------------- #}
+  {%- set weapons = character.items | selectattr("item_type", "equalto", "weapon") | list %}
+  {%- set backpack_items = character.items | selectattr("item_type", "equalto", "backpack") | list %}
+  {%- set special_items = character.items | selectattr("item_type", "equalto", "special") | list %}
+  <details class="inventory-drawer">
+    <summary class="inventory-summary">
+      Inventory
+      <span class="inventory-slot-counter" aria-label="Weapons">
+        <abbr title="Weapons">W</abbr> {{ weapons | length }}/2
+      </span>
+      <span class="inventory-slot-counter" aria-label="Backpack items">
+        <abbr title="Backpack">BP</abbr> {{ backpack_items | length }}/8
+      </span>
+    </summary>
+
+    <div class="inventory-content">
+
+      {# Gold and Meals #}
+      <div class="inventory-meters">
+        <span class="inventory-meter-item">
+          <abbr title="Gold Crowns">Gold</abbr>:
+          <strong>{{ character.gold }}</strong>
+        </span>
+        <span class="inventory-meter-item">
+          <abbr title="Meals">Meals</abbr>:
+          <strong>{{ character.meals }}</strong>
+        </span>
+      </div>
+
+      {# Weapons #}
+      {% if weapons %}
+      <section class="inventory-category" aria-label="Weapons">
+        <h4 class="inventory-category-heading">
+          Weapons
+          <span class="slot-counter">{{ weapons | length }}/2</span>
+        </h4>
+        {% for item in weapons %}
+        <div class="inventory-item{% if item.is_equipped %} inventory-item-equipped{% endif %}">
+          <span class="inventory-item-name">
+            {{ item.item_name }}
+            {% if item.is_equipped %}
+            <span class="equipped-badge" aria-label="Equipped">Equipped</span>
+            {% endif %}
+          </span>
+          <div class="inventory-item-actions">
+            {% if item.is_equipped %}
+            <form method="post" action="/ui/game/{{ character.id }}/item/unequip">
+              <input type="hidden" name="character_item_id" value="{{ item.id }}">
+              <input type="hidden" name="version" value="{{ scene.version }}">
+              <button type="submit" class="inv-btn inv-btn-unequip">Unequip</button>
+            </form>
+            {% else %}
+            <form method="post" action="/ui/game/{{ character.id }}/item/equip">
+              <input type="hidden" name="character_item_id" value="{{ item.id }}">
+              <input type="hidden" name="version" value="{{ scene.version }}">
+              <button type="submit" class="inv-btn inv-btn-equip">Equip</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/ui/game/{{ character.id }}/item/drop">
+              <input type="hidden" name="character_item_id" value="{{ item.id }}">
+              <input type="hidden" name="version" value="{{ scene.version }}">
+              <button type="submit" class="inv-btn inv-btn-drop">Drop</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </section>
+      {% else %}
+      <p class="inventory-empty muted-note">No weapons carried.</p>
+      {% endif %}
+
+      {# Backpack items #}
+      {% if backpack_items %}
+      <section class="inventory-category" aria-label="Backpack items">
+        <h4 class="inventory-category-heading">
+          Backpack
+          <span class="slot-counter">{{ backpack_items | length }}/8</span>
+        </h4>
+        {% for item in backpack_items %}
+        <div class="inventory-item">
+          <span class="inventory-item-name">{{ item.item_name }}</span>
+          <div class="inventory-item-actions">
+            <form method="post" action="/ui/game/{{ character.id }}/item/drop">
+              <input type="hidden" name="character_item_id" value="{{ item.id }}">
+              <input type="hidden" name="version" value="{{ scene.version }}">
+              <button type="submit" class="inv-btn inv-btn-drop">Drop</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </section>
+      {% endif %}
+
+      {# Special items — display only, cannot be dropped #}
+      {% if special_items %}
+      <section class="inventory-category" aria-label="Special items">
+        <h4 class="inventory-category-heading">Special Items</h4>
+        {% for item in special_items %}
+        <div class="inventory-item inventory-item-special">
+          <span class="inventory-item-name">{{ item.item_name }}</span>
+        </div>
+        {% endfor %}
+      </section>
+      {% endif %}
+
+      {% if not weapons and not backpack_items and not special_items %}
+      <p class="inventory-empty muted-note">Your inventory is empty.</p>
+      {% endif %}
+
+    </div>{# .inventory-content #}
+  </details>
+
+  {# -----------------------------------------------------------------------
+     Bug report collapsible
+  ----------------------------------------------------------------------- #}
+  <details class="bug-report-details">
+    <summary>Report a problem with this scene</summary>
+    <div id="bug-report-area">
+      <form
+        hx-post="/ui/game/{{ character.id }}/report"
+        hx-target="#bug-report-area"
+        hx-swap="innerHTML">
+        <input type="hidden" name="scene_id" value="{{ character.current_scene_id or 0 }}">
+        <fieldset>
+          <legend>Category (select all that apply)</legend>
+          {% for tag in valid_tags %}
+          <label>
+            <input type="checkbox" name="tags" value="{{ tag }}">
+            {{ tag | replace("_", " ") | title }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        <label for="bug-free-text">Description</label>
+        <textarea
+          id="bug-free-text"
+          name="free_text"
+          rows="3"
+          placeholder="Describe the issue..."></textarea>
+        <button type="submit" class="secondary">Submit Report</button>
+      </form>
+    </div>
+  </details>
+
+</div><!-- .scene-container -->
+{% endblock %}

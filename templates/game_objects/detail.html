@@ -1,0 +1,70 @@
+{% extends "layout/player.html" %}
+
+{% block title %}{{ obj.name }}{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>{{ obj.name }}</h1>
+      <p>{{ obj.kind | capitalize }}</p>
+    </hgroup>
+    <nav>
+      <ul>
+        <li><a href="/ui/game-objects" role="button" class="outline">Encyclopedia</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  {% if obj.description %}
+  <p>{{ obj.description }}</p>
+  {% endif %}
+
+  <dl>
+    <dt>Kind</dt>
+    <dd>{{ obj.kind | capitalize }}</dd>
+
+    {% if obj.aliases %}
+    <dt>Also Known As</dt>
+    <dd>{{ obj.aliases | join(", ") }}</dd>
+    {% endif %}
+
+    {% if obj.first_appearance %}
+    <dt>First Appearance</dt>
+    <dd><a href="/ui/books/{{ obj.first_appearance.book_id }}">{{ obj.first_appearance.book_title }}</a></dd>
+    {% endif %}
+  </dl>
+
+  {% if obj.properties %}
+  <details>
+    <summary><strong>Properties</strong></summary>
+    <dl>
+      {% for key, value in obj.properties.items() %}
+      <dt>{{ key }}</dt>
+      <dd>{{ value }}</dd>
+      {% endfor %}
+    </dl>
+  </details>
+  {% endif %}
+
+  {% if obj.refs %}
+  <section>
+    <h2>Related Entities</h2>
+    <ul>
+      {% for ref in obj.refs %}
+      <li>
+        <a href="/ui/game-objects/{{ ref.target.id }}">{{ ref.target.name }}</a>
+        <small>({{ ref.target.kind }})</small>
+        {% if ref.tags %}
+        &mdash;
+        {% for tag in ref.tags %}
+        <small class="tag">{{ tag }}</small>
+        {% endfor %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}

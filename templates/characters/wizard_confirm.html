@@ -1,0 +1,64 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Confirm Character{% endblock %}
+
+{% block content %}
+<section>
+  <p class="wizard-progress" style="font-size:0.875rem;color:var(--pico-muted-color)">
+    Step {{ step_index + 1 }} of {{ total_steps }}: Confirm
+  </p>
+  <h1>Confirm Your Character</h1>
+  <p>Review your character before beginning your adventure.</p>
+
+  {% if preview %}
+  <article>
+    <header><h2>{{ preview.name }}</h2></header>
+
+    <section>
+      <h3>Stats</h3>
+      <dl class="stat-grid">
+        <div>
+          <dt>Combat Skill</dt>
+          <dd>{{ preview.combat_skill_base }}</dd>
+        </div>
+        <div>
+          <dt>Endurance</dt>
+          <dd>{{ preview.endurance_current }} / {{ preview.endurance_max }}</dd>
+        </div>
+        <div>
+          <dt>Gold Crowns</dt>
+          <dd>{{ preview.gold }}</dd>
+        </div>
+        <div>
+          <dt>Meals</dt>
+          <dd>{{ preview.meals }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    {% if preview.disciplines %}
+    <section>
+      <h3>Kai Disciplines</h3>
+      <ul>
+        {% for discipline in preview.disciplines %}
+        <li>{{ discipline }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if preview.active_wizard %}
+    <p><small>Wizard: {{ preview.active_wizard.type }} — step {{ preview.active_wizard.step }}</small></p>
+    {% endif %}
+  </article>
+  {% endif %}
+
+  <form method="post" action="/ui/characters/{{ character_id }}/wizard">
+    <input type="hidden" name="step" value="confirm">
+    <input type="hidden" name="version" value="{{ version }}">
+    <button type="submit">Begin Adventure!</button>
+  </form>
+
+  <p><a href="/ui/characters/{{ character_id }}/wizard">&larr; Back</a></p>
+</section>
+{% endblock %}

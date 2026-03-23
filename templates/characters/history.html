@@ -1,0 +1,70 @@
+{% extends "layout/player.html" %}
+
+{% block title %}History &mdash; {{ character.name }}{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>{{ character.name }}</h1>
+      <p>Decision History</p>
+    </hgroup>
+    <nav>
+      <ul>
+        <li><a href="/ui/characters/{{ character.id }}/sheet" role="button" class="outline">Character Sheet</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <form method="get" action="/ui/characters/{{ character.id }}/history" style="margin-bottom: 1rem;">
+    <label for="run">Filter by Run</label>
+    <select id="run" name="run" onchange="this.form.submit()">
+      <option value="">All Runs</option>
+      {% for r in runs %}
+      <option value="{{ r }}" {% if selected_run == r %}selected{% endif %}>Run {{ r }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <table role="grid">
+    <thead>
+      <tr>
+        <th>Run</th>
+        <th>From Scene</th>
+        <th>Choice</th>
+        <th>To Scene</th>
+        <th>Action</th>
+        <th>When</th>
+      </tr>
+    </thead>
+    <tbody id="history-rows">
+      {% for entry in history %}
+      <tr>
+        <td>{{ entry.run_number }}</td>
+        <td>{% if entry.scene_number %}{{ entry.scene_number }}{% else %}&mdash;{% endif %}</td>
+        <td>{% if entry.choice_text %}{{ entry.choice_text }}{% else %}&mdash;{% endif %}</td>
+        <td>{% if entry.target_scene_number %}{{ entry.target_scene_number }}{% else %}&mdash;{% endif %}</td>
+        <td>{{ entry.action_type }}</td>
+        <td>{{ entry.created_at[:19].replace("T", " ") }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6">No history yet{% if selected_run %} for run {{ selected_run }}{% endif %}.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if has_more %}
+  <div style="text-align: center; margin-top: 1rem;">
+    <button
+      hx-get="/ui/characters/{{ character.id }}/history?offset={{ next_offset }}{% if selected_run %}&run={{ selected_run }}{% endif %}&partial=1"
+      hx-target="#history-rows"
+      hx-swap="beforeend"
+      class="outline">
+      Load More
+    </button>
+  </div>
+  {% endif %}
+</article>
+{% endblock %}

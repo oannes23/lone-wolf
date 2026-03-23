@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Lone Wolf{% endblock %} — Lone Wolf</title>
+  <link rel="stylesheet" href="/static/css/pico.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/htmx.min.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% block body %}{% endblock %}
+
+  <script>
+    // Dark/light mode toggle — persists preference in localStorage
+    (function () {
+      var stored = localStorage.getItem('lw-theme');
+      if (stored) {
+        document.documentElement.setAttribute('data-theme', stored);
+      }
+    })();
+
+    function toggleTheme() {
+      var html = document.documentElement;
+      var current = html.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('lw-theme', next);
+      var btns = document.querySelectorAll('.theme-toggle');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].setAttribute('aria-label', next === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+        btns[i].textContent = next === 'dark' ? 'Light' : 'Dark';
+      }
+    }
+  </script>
+</body>
+</html>

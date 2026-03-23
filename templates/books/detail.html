@@ -1,0 +1,48 @@
+{% extends "layout/player.html" %}
+
+{% block title %}{{ book.title }}{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>Book {{ book.number }}: {{ book.title }}</h1>
+      <p>{{ book.era | capitalize }} era &mdash; {{ book.scene_count }} scenes</p>
+    </hgroup>
+    <nav>
+      <ul>
+        <li><a href="/ui/books" role="button" class="outline">All Books</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <dl>
+    <dt>Era</dt>
+    <dd>{{ book.era | capitalize }}</dd>
+
+    <dt>Starting Scene</dt>
+    <dd>Scene {{ book.start_scene_number }}</dd>
+
+    <dt>Total Scenes</dt>
+    <dd>{{ book.scene_count }}</dd>
+
+    <dt>Max Discipline Picks</dt>
+    <dd>{{ book.max_total_picks }}</dd>
+  </dl>
+
+  {% if book.disciplines %}
+  <details>
+    <summary><strong>Disciplines ({{ book.disciplines | length }})</strong></summary>
+    <ul>
+      {% for disc in book.disciplines %}
+      <li>
+        <strong>{{ disc.name }}</strong>
+        <br>
+        <small>{{ disc.description }}</small>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</article>
+{% endblock %}

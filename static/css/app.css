@@ -1,0 +1,1163 @@
+/* Lone Wolf — game-specific custom styles */
+
+/* -------------------------------------------------------------------------
+   Layout
+   ------------------------------------------------------------------------- */
+
+:root {
+  --lw-nav-height: 3.5rem;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* Constrain main content width on large screens */
+main {
+  max-width: 60rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+/* -------------------------------------------------------------------------
+   Navigation
+   ------------------------------------------------------------------------- */
+
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  padding: 0 1rem;
+}
+
+nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+nav a {
+  text-decoration: none;
+  color: var(--pico-color);
+}
+
+nav a:hover {
+  color: var(--pico-primary);
+}
+
+/* Mobile hamburger — uses Pico <details> pattern */
+nav details {
+  margin: 0;
+}
+
+nav details summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.75rem 0;
+  list-style: none;
+  user-select: none;
+}
+
+nav details summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Hide desktop nav on mobile */
+@media (max-width: 48rem) {
+  .nav-desktop {
+    display: none;
+  }
+}
+
+/* Hide mobile nav on desktop */
+@media (min-width: 48.001rem) {
+  .nav-mobile {
+    display: none;
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--lw-nav-height);
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Auth forms
+   ------------------------------------------------------------------------- */
+
+.auth-container {
+  max-width: 26rem;
+  margin: 4rem auto;
+  padding: 2rem 1.5rem;
+}
+
+.auth-container h1 {
+  margin-top: 0;
+  text-align: center;
+}
+
+.auth-flavor {
+  text-align: center;
+  color: var(--pico-muted-color);
+  margin-top: -0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.auth-links {
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+/* -------------------------------------------------------------------------
+   Alert / error message
+   ------------------------------------------------------------------------- */
+
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: var(--pico-border-radius);
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+
+.alert-error {
+  background-color: color-mix(in srgb, var(--pico-del-color) 15%, transparent);
+  border-color: var(--pico-del-color);
+  color: var(--pico-del-color);
+}
+
+.alert-success {
+  background-color: color-mix(in srgb, var(--pico-ins-color) 15%, transparent);
+  border-color: var(--pico-ins-color);
+  color: var(--pico-ins-color);
+}
+
+/* -------------------------------------------------------------------------
+   Theme toggle button
+   ------------------------------------------------------------------------- */
+
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.1rem;
+  color: var(--pico-color);
+  border-radius: var(--pico-border-radius);
+}
+
+.theme-toggle:hover {
+  background: var(--pico-muted-color);
+  color: var(--pico-background-color);
+}
+
+/* -------------------------------------------------------------------------
+   Navigation — account links (visually demoted)
+   ------------------------------------------------------------------------- */
+
+.nav-account {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.nav-account:hover {
+  opacity: 1;
+}
+
+/* -------------------------------------------------------------------------
+   Scene layout
+   ------------------------------------------------------------------------- */
+
+.scene-container {
+  padding-block: 1rem;
+}
+
+.scene-header h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  color: var(--pico-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.scene-illustration img {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--pico-border-radius);
+  margin-block: 1rem;
+}
+
+.scene-illustration {
+  margin: 0;
+}
+
+.scene-narrative {
+  line-height: 1.7;
+  font-size: 1.05rem;
+  margin-block: 1.5rem;
+}
+
+/* -------------------------------------------------------------------------
+   Stats bar
+   ------------------------------------------------------------------------- */
+
+.stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.stat-item {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.stat-back {
+  margin-left: auto;
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--pico-muted-color);
+}
+
+.stat-back:hover {
+  color: var(--pico-primary);
+}
+
+/* -------------------------------------------------------------------------
+   Phase result severity colors
+   ------------------------------------------------------------------------- */
+
+.phase-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}
+
+.phase-result {
+  padding: 0.65rem 1rem;
+  border-radius: var(--pico-border-radius);
+  border-left: 4px solid transparent;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.phase-result-info {
+  background-color: color-mix(in srgb, var(--pico-primary) 10%, transparent);
+  border-color: var(--pico-primary);
+}
+
+.phase-result-warn {
+  background-color: color-mix(in srgb, #f59e0b 15%, transparent);
+  border-color: #f59e0b;
+  color: var(--pico-color);
+}
+
+.phase-result-danger {
+  background-color: color-mix(in srgb, var(--pico-del-color) 15%, transparent);
+  border-color: var(--pico-del-color);
+}
+
+/* -------------------------------------------------------------------------
+   Choice buttons
+   ------------------------------------------------------------------------- */
+
+.choices-heading {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+  color: var(--pico-muted-color);
+}
+
+.choices-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-block: 1.5rem;
+}
+
+.choices-section form {
+  margin: 0;
+}
+
+.choice-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid var(--pico-primary);
+  background: transparent;
+  color: var(--pico-primary);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.15s ease, color 0.15s ease;
+  line-height: 1.4;
+}
+
+.choice-btn:hover:not([disabled]) {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+
+.choice-btn-unavailable {
+  border-color: var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.choice-btn-danger {
+  border-color: var(--pico-del-color);
+  color: var(--pico-del-color);
+}
+
+.choice-btn-danger:hover {
+  background: var(--pico-del-color);
+  color: #fff;
+}
+
+.choice-btn-secondary {
+  border-color: var(--pico-muted-border-color);
+  color: var(--pico-color);
+}
+
+.choice-btn-secondary:hover {
+  background: var(--pico-muted-border-color);
+}
+
+.roll-indicator {
+  font-size: 0.8em;
+  opacity: 0.8;
+  margin-left: 0.4em;
+}
+
+.condition-label {
+  display: block;
+  font-size: 0.8em;
+  opacity: 0.7;
+  margin-top: 0.2em;
+}
+
+.muted-note {
+  color: var(--pico-muted-color);
+  font-style: italic;
+}
+
+/* -------------------------------------------------------------------------
+   Death / victory panels
+   ------------------------------------------------------------------------- */
+
+.death-panel,
+.victory-panel {
+  border-radius: var(--pico-border-radius);
+  padding: 1.5rem;
+  margin-block: 1.5rem;
+}
+
+.death-panel {
+  border: 2px solid var(--pico-del-color);
+  background: color-mix(in srgb, var(--pico-del-color) 8%, transparent);
+}
+
+.death-panel h3 {
+  color: var(--pico-del-color);
+  margin-top: 0;
+}
+
+.victory-panel {
+  border: 2px solid var(--pico-ins-color);
+  background: color-mix(in srgb, var(--pico-ins-color) 8%, transparent);
+}
+
+.victory-panel h3 {
+  color: var(--pico-ins-color);
+  margin-top: 0;
+}
+
+.victory-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.victory-actions form {
+  margin: 0;
+}
+
+/* -------------------------------------------------------------------------
+   Pending items panel (items phase)
+   ------------------------------------------------------------------------- */
+
+.items-section {
+  margin-block: 1.5rem;
+}
+
+.items-heading {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+  color: var(--pico-muted-color);
+}
+
+.items-intro {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.pending-item-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid var(--pico-primary);
+  background: color-mix(in srgb, var(--pico-primary) 5%, transparent);
+  margin-bottom: 0.6rem;
+}
+
+.pending-item-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pending-item-name {
+  font-size: 1rem;
+}
+
+.pending-item-type {
+  font-size: 0.8em;
+  color: var(--pico-muted-color);
+}
+
+.item-badge {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  border-radius: 0.25em;
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.item-badge-required {
+  background: color-mix(in srgb, var(--pico-del-color) 20%, transparent);
+  color: var(--pico-del-color);
+  border: 1px solid var(--pico-del-color);
+}
+
+.pending-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.pending-item-actions form {
+  margin: 0;
+}
+
+.item-action-btn {
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  line-height: 1.3;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.item-action-accept {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-color: var(--pico-primary);
+}
+
+.item-action-accept:hover {
+  background: color-mix(in srgb, var(--pico-primary) 85%, black);
+}
+
+.item-action-decline {
+  background: transparent;
+  color: var(--pico-muted-color);
+  border-color: var(--pico-muted-border-color);
+}
+
+.item-action-decline:hover {
+  background: var(--pico-muted-border-color);
+  color: var(--pico-color);
+}
+
+/* -------------------------------------------------------------------------
+   Inventory drawer
+   ------------------------------------------------------------------------- */
+
+.inventory-drawer {
+  margin-top: 2rem;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 0;
+}
+
+.inventory-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.inventory-summary::-webkit-details-marker {
+  display: none;
+}
+
+.inventory-summary::after {
+  content: "▾";
+  margin-left: auto;
+  font-size: 0.85em;
+  color: var(--pico-muted-color);
+  transition: transform 0.2s ease;
+}
+
+.inventory-drawer[open] .inventory-summary::after {
+  transform: rotate(-180deg);
+}
+
+.inventory-slot-counter {
+  font-size: 0.8em;
+  color: var(--pico-muted-color);
+  font-weight: 400;
+  padding: 0.1em 0.45em;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 0.25em;
+}
+
+.inventory-content {
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+
+.inventory-meters {
+  display: flex;
+  gap: 1.25rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.inventory-meter-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.inventory-category {
+  margin-top: 0.9rem;
+}
+
+.inventory-category:first-of-type {
+  margin-top: 0;
+}
+
+.inventory-category-heading {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pico-muted-color);
+  margin-bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.slot-counter {
+  font-size: 0.85em;
+  font-weight: 400;
+  padding: 0.05em 0.35em;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 0.2em;
+}
+
+.inventory-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--pico-border-radius);
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+  border: 1px solid transparent;
+}
+
+.inventory-item:last-child {
+  margin-bottom: 0;
+}
+
+.inventory-item-equipped {
+  border-color: var(--pico-primary);
+  background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
+}
+
+.inventory-item-special {
+  border-color: color-mix(in srgb, #f59e0b 50%, transparent);
+  background: color-mix(in srgb, #f59e0b 6%, transparent);
+}
+
+.inventory-item-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.equipped-badge {
+  font-size: 0.7em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.25em;
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inventory-item-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.inventory-item-actions form {
+  margin: 0;
+}
+
+.inv-btn {
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid transparent;
+  font-size: 0.8rem;
+  cursor: pointer;
+  line-height: 1.3;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.inv-btn-equip {
+  border-color: var(--pico-primary);
+  color: var(--pico-primary);
+  background: transparent;
+}
+
+.inv-btn-equip:hover {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+
+.inv-btn-unequip {
+  border-color: var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+  background: transparent;
+}
+
+.inv-btn-unequip:hover {
+  background: var(--pico-muted-border-color);
+  color: var(--pico-color);
+}
+
+.inv-btn-drop {
+  border-color: var(--pico-del-color);
+  color: var(--pico-del-color);
+  background: transparent;
+}
+
+.inv-btn-drop:hover {
+  background: var(--pico-del-color);
+  color: #fff;
+}
+
+.inv-btn-use {
+  border-color: var(--pico-ins-color);
+  color: var(--pico-ins-color);
+  background: transparent;
+}
+
+.inv-btn-use:hover {
+  background: var(--pico-ins-color);
+  color: #fff;
+}
+
+.inventory-empty {
+  font-size: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+/* -------------------------------------------------------------------------
+   Combat panel
+   ------------------------------------------------------------------------- */
+
+.combat-section {
+  margin-block: 1.5rem;
+  padding: 1.25rem;
+  border-radius: var(--pico-border-radius);
+  border: 2px solid var(--pico-del-color);
+  background: color-mix(in srgb, var(--pico-del-color) 6%, transparent);
+}
+
+.combat-header {
+  margin-bottom: 1rem;
+}
+
+.combat-title {
+  margin: 0;
+  color: var(--pico-del-color);
+  font-size: 1.1rem;
+}
+
+.combat-combatants {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+.combat-vs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: var(--pico-muted-color);
+  padding-top: 2rem;
+}
+
+.combatant {
+  padding: 0.75rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid var(--pico-muted-border-color);
+}
+
+.combatant-enemy {
+  border-color: var(--pico-del-color);
+}
+
+.combatant-hero {
+  border-color: var(--pico-primary);
+}
+
+.combatant-name {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.combatant-stats {
+  margin: 0 0 0.5rem;
+}
+
+.combatant-stats .stat-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.combatant-stats dt {
+  color: var(--pico-muted-color);
+}
+
+.combatant-stats dd {
+  margin: 0;
+}
+
+/* Endurance progress bars */
+
+.end-bar-wrap {
+  margin-top: 0.4rem;
+}
+
+.end-bar {
+  width: 100%;
+  height: 0.6rem;
+  border-radius: 999px;
+}
+
+.end-bar-enemy {
+  accent-color: var(--pico-del-color);
+}
+
+.end-bar-hero {
+  accent-color: var(--pico-ins-color);
+}
+
+.end-bar-hero.end-bar-low {
+  accent-color: #f59e0b;
+}
+
+.end-bar-hero.end-bar-critical {
+  accent-color: var(--pico-del-color);
+}
+
+/* Round info and controls */
+
+.combat-round-info {
+  font-size: 0.9rem;
+  color: var(--pico-muted-color);
+  margin-bottom: 1rem;
+}
+
+.combat-fight-form,
+.combat-evade-form {
+  margin: 0 0 0.5rem;
+}
+
+.combat-fight-btn {
+  background: var(--pico-del-color);
+  color: #fff;
+  border-color: var(--pico-del-color);
+  font-weight: bold;
+  min-height: 3rem;
+}
+
+.combat-fight-btn:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--pico-del-color) 80%, black);
+  color: #fff;
+}
+
+.combat-evade-btn {
+  min-height: 3rem;
+}
+
+.evasion-hint {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+/* Psi-surge toggle */
+
+.psi-surge-toggle {
+  margin-bottom: 1rem;
+}
+
+.psi-surge-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.psi-surge-note {
+  color: var(--pico-muted-color);
+  font-size: 0.8em;
+}
+
+/* Mobile: stack combatants vertically on small screens */
+@media (max-width: 36rem) {
+  .combat-combatants {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-vs {
+    padding-top: 0;
+    text-align: center;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Random roll panel
+   ------------------------------------------------------------------------- */
+
+.roll-section {
+  margin-block: 1.5rem;
+  padding: 1.25rem;
+  border-radius: var(--pico-border-radius);
+  border: 2px solid #f59e0b;
+  background: color-mix(in srgb, #f59e0b 8%, transparent);
+}
+
+.roll-heading {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.roll-description {
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.roll-form {
+  margin: 0;
+}
+
+.roll-btn {
+  min-height: 3rem;
+  font-weight: bold;
+}
+
+/* -------------------------------------------------------------------------
+   Admin UI
+   ------------------------------------------------------------------------- */
+
+/* Admin accent color — purple to distinguish from player UI (blue) */
+.admin-layout {
+  --pico-primary: #8b5cf6;
+  --pico-primary-hover: #7c3aed;
+  --pico-primary-focus: rgba(139, 92, 246, 0.25);
+  --pico-primary-inverse: #fff;
+}
+
+/* Admin nav inherits the admin layout accent */
+.admin-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--pico-background-color);
+  border-bottom: 2px solid var(--pico-primary);
+  padding: 0 1rem;
+}
+
+/* Dashboard summary card grid */
+.admin-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.admin-card {
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--pico-border-radius);
+  border: 1px solid var(--pico-muted-border-color);
+}
+
+.admin-card-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pico-muted-color);
+}
+
+.admin-card-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+  line-height: 1;
+}
+
+.admin-card-value-warn {
+  color: #f59e0b;
+}
+
+.admin-card-value-ok {
+  color: #10b981;
+}
+
+.admin-card-link {
+  font-size: 0.85rem;
+  color: var(--pico-primary);
+  text-decoration: none;
+}
+
+.admin-card-link:hover {
+  text-decoration: underline;
+}
+
+.admin-recent-reports {
+  margin-bottom: 2rem;
+}
+
+.admin-quick-links {
+  margin-bottom: 2rem;
+}
+
+/* Source badges (used in Story 9.2) */
+.source-badge {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  border-radius: 0.25em;
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-badge-auto {
+  background: color-mix(in srgb, #6b7280 20%, transparent);
+  color: #6b7280;
+  border: 1px solid #6b7280;
+}
+
+.source-badge-manual {
+  background: color-mix(in srgb, #3b82f6 20%, transparent);
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+}
+
+/* Status badges (used in Stories 9.2, 9.3) */
+.status-badge {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  border-radius: 0.25em;
+  font-size: 0.75em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-badge-open {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+  color: #f59e0b;
+  border: 1px solid #f59e0b;
+}
+
+.status-badge-triaging {
+  background: color-mix(in srgb, #3b82f6 20%, transparent);
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+}
+
+.status-badge-resolved {
+  background: color-mix(in srgb, #10b981 20%, transparent);
+  color: #10b981;
+  border: 1px solid #10b981;
+}
+
+.status-badge-wont_fix {
+  background: color-mix(in srgb, #6b7280 20%, transparent);
+  color: #6b7280;
+  border: 1px solid #6b7280;
+}
+
+/* Tag badges (used in report views) */
+.tag-badge {
+  display: inline-block;
+  padding: 0.1em 0.45em;
+  border-radius: 0.25em;
+  font-size: 0.8em;
+  background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
+  border: 1px solid var(--pico-primary);
+  color: var(--pico-primary);
+  margin-right: 0.25em;
+}
+
+/* Admin filters and table layout */
+.admin-filters {
+  margin-bottom: 1.5rem;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+/* Admin pagination */
+.pagination {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* Report detail layout */
+.report-details dt {
+  font-weight: 600;
+  color: var(--pico-muted-color);
+}
+
+.scene-snippet {
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 1rem;
+  background: color-mix(in srgb, var(--pico-primary) 3%, transparent);
+}
+
+/* Inline number input (admin user max_characters) */
+.inline-number-input {
+  width: 5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.max-chars-cell {
+  min-width: 6rem;
+}
+
+/* Compact admin button */
+.small {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* Event details column */
+.details-cell {
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------------------
+   Bug report collapsible
+   ------------------------------------------------------------------------- */
+
+.bug-report-details {
+  margin-top: 3rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+  padding-top: 1rem;
+}
+
+.bug-report-details summary {
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+  cursor: pointer;
+}
+
+.bug-report-details fieldset {
+  border: none;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+
+.bug-report-details legend {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.bug-report-details label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.bug-report-details input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}

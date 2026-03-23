@@ -1,0 +1,43 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Encyclopedia{% endblock %}
+
+{% block content %}
+<section>
+  <h1>Encyclopedia</h1>
+  <p>Browse characters, locations, creatures, items, and other entities from the Lone Wolf world.</p>
+
+  <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+    <label for="kind-filter" style="flex: 0 0 auto; align-self: center;">Type</label>
+    <select
+      id="kind-filter"
+      name="kind"
+      hx-get="/ui/game-objects"
+      hx-target="#results"
+      hx-trigger="change"
+      hx-include="#search-input"
+      style="flex: 1 1 10rem;">
+      <option value="" {% if not selected_kind %}selected{% endif %}>All types</option>
+      {% for k in kinds %}
+      <option value="{{ k }}" {% if selected_kind == k %}selected{% endif %}>{{ k | capitalize }}</option>
+      {% endfor %}
+    </select>
+
+    <input
+      id="search-input"
+      type="search"
+      name="search"
+      placeholder="Search by name&hellip;"
+      value="{{ search or '' }}"
+      hx-get="/ui/game-objects"
+      hx-target="#results"
+      hx-trigger="keyup changed delay:300ms"
+      hx-include="#kind-filter"
+      style="flex: 2 1 15rem;">
+  </div>
+
+  <div id="results">
+    {% include "game_objects/_results.html" %}
+  </div>
+</section>
+{% endblock %}

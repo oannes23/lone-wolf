@@ -1,0 +1,74 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Adjust Inventory{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>Book Advance</h1>
+      <p>Step {{ wizard.step_index + 1 }} of {{ wizard.total_steps }}: Adjust Inventory</p>
+    </hgroup>
+  </header>
+
+  <p>Choose which items to carry forward. You may carry a maximum of <strong>{{ wizard.max_weapons }}</strong> weapon(s) and <strong>{{ wizard.max_backpack_items }}</strong> backpack item(s).</p>
+
+  <form method="post" action="/ui/characters/{{ character_id }}/wizard">
+    <input type="hidden" name="step" value="inventory_adjust">
+    <input type="hidden" name="version" value="{{ version }}">
+
+    <section>
+      <h2>Weapons <small>({{ wizard.current_weapons | length }} / {{ wizard.max_weapons }})</small></h2>
+      {% if wizard.current_weapons %}
+      <fieldset>
+        {% for item in wizard.current_weapons %}
+        <label>
+          <input
+            type="checkbox"
+            name="keep_weapons"
+            value="{{ item.item_name }}"
+            checked>
+          {{ item.item_name }}{% if item.is_equipped %} <small>(equipped)</small>{% endif %}
+        </label>
+        {% endfor %}
+      </fieldset>
+      {% else %}
+      <p>No weapons.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Backpack Items <small>({{ wizard.current_backpack | length }} / {{ wizard.max_backpack_items }})</small></h2>
+      {% if wizard.current_backpack %}
+      <fieldset>
+        {% for item in wizard.current_backpack %}
+        <label>
+          <input
+            type="checkbox"
+            name="keep_backpack"
+            value="{{ item.item_name }}"
+            checked>
+          {{ item.item_name }}
+        </label>
+        {% endfor %}
+      </fieldset>
+      {% else %}
+      <p>No backpack items.</p>
+      {% endif %}
+    </section>
+
+    {% if wizard.current_special %}
+    <section>
+      <h2>Special Items</h2>
+      <ul>
+        {% for item in wizard.current_special %}
+        <li>{{ item.item_name }} <small>(carried automatically)</small></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <button type="submit">Continue</button>
+  </form>
+</article>
+{% endblock %}

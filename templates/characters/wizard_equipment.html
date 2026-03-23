@@ -1,0 +1,168 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Choose Equipment{% endblock %}
+
+{% block head %}
+<style>
+  .equipment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+  .equipment-item label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+  .pick-counter {
+    font-weight: bold;
+  }
+  .pick-counter.over-limit {
+    color: var(--pico-color-red-550, #e74c3c);
+  }
+  .included-list {
+    list-style: none;
+    padding: 0;
+  }
+  .included-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+  }
+  .included-badge {
+    font-size: 0.75rem;
+    background: var(--pico-secondary-background, #6c757d);
+    color: white;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+  }
+  .wizard-progress {
+    font-size: 0.875rem;
+    color: var(--pico-muted-color);
+    margin-bottom: 1rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section>
+  <p class="wizard-progress">Step {{ step_index + 1 }} of {{ total_steps }}: Choose Equipment</p>
+  <h1>Starting Equipment</h1>
+
+  {% if included_items %}
+  <article>
+    <header><h2>Included Items</h2></header>
+    <p>These items are automatically included with your character.</p>
+    <ul class="included-list">
+      {% for item in included_items %}
+      <li>
+        <span class="included-badge">Included</span>
+        <strong>{{ item.item_name }}</strong>
+        <small>({{ item.item_type }})</small>
+      </li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% endif %}
+
+  {% if auto_applied %}
+  <article>
+    <header><h2>Starting Resources</h2></header>
+    <dl>
+      <div>
+        <dt>Gold Crowns</dt>
+        <dd>{{ auto_applied.gold }} <small>({{ auto_applied.gold_formula }})</small></dd>
+      </div>
+      <div>
+        <dt>Meals</dt>
+        <dd>{{ auto_applied.meals }}</dd>
+      </div>
+    </dl>
+  </article>
+  {% endif %}
+
+  <form method="post" action="/ui/characters/{{ character_id }}/wizard" id="equipment-form">
+    <input type="hidden" name="step" value="pick_equipment">
+    <input type="hidden" name="version" value="{{ version }}">
+
+    {% if available_equipment %}
+    <fieldset>
+      <legend>
+        Choose Up To {{ pick_limit }} Items
+        <span aria-live="polite">
+          (<span class="pick-counter" id="pick-counter">0</span> / {{ pick_limit }} selected)
+        </span>
+      </legend>
+
+      <div class="equipment-grid" role="group" aria-label="Available equipment">
+        {% for item in available_equipment %}
+        <div class="equipment-item">
+          <label>
+            <input
+              type="checkbox"
+              name="selected_items"
+              value="{{ item.item_name }}"
+              class="equipment-checkbox"
+              aria-label="{{ item.item_name }} ({{ item.item_type }})">
+            <span>
+              <strong>{{ item.item_name }}</strong>
+              <br>
+              <small>{{ item.item_type }}</small>
+            </span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% else %}
+    <p>No additional equipment available to choose.</p>
+    {% endif %}
+
+    <button type="submit">Accept Equipment &amp; Continue</button>
+  </form>
+</section>
+
+<script>
+(function () {
+  var MAX_PICKS = {{ pick_limit }};
+  var checkboxes = document.querySelectorAll('.equipment-checkbox');
+  var counter = document.getElementById('pick-counter');
+
+  if (!counter) return;
+
+  function getCount() {
+    var n = 0;
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (checkboxes[i].checked) n++;
+    }
+    return n;
+  }
+
+  function update() {
+    var count = getCount();
+    counter.textContent = count;
+    if (count > MAX_PICKS) {
+      counter.classList.add('over-limit');
+    } else {
+      counter.classList.remove('over-limit');
+    }
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (!checkboxes[i].checked && count >= MAX_PICKS) {
+        checkboxes[i].disabled = true;
+      } else {
+        checkboxes[i].disabled = false;
+      }
+    }
+  }
+
+  for (var i = 0; i < checkboxes.length; i++) {
+    checkboxes[i].addEventListener('change', update);
+  }
+
+  update();
+})();
+</script>
+{% endblock %}

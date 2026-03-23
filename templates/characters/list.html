@@ -1,0 +1,69 @@
+{% extends "layout/player.html" %}
+
+{% block title %}My Characters{% endblock %}
+
+{% block content %}
+<section>
+  <div class="page-header">
+    <h1>My Characters</h1>
+    <a href="/ui/characters/roll" role="button">Create New Character</a>
+  </div>
+
+  {% if characters %}
+    {% for char in characters %}
+    <article class="character-card">
+      <header>
+        <h2>
+          <a href="{% if char.has_active_wizard %}/ui/characters/{{ char.id }}/wizard{% else %}/ui/game/{{ char.id }}{% endif %}">
+            {{ char.name }}
+          </a>
+        </h2>
+        <span class="character-status {% if char.is_alive %}status-alive{% else %}status-dead{% endif %}">
+          {% if not char.is_alive %}Dead{% elif char.has_active_wizard %}Setup in progress{% else %}Alive{% endif %}
+        </span>
+      </header>
+
+      <dl class="character-stats">
+        <div>
+          <dt>Book</dt>
+          <dd>{{ char.book_title }}</dd>
+        </div>
+        <div>
+          <dt>Combat Skill</dt>
+          <dd>{{ char.combat_skill }}</dd>
+        </div>
+        <div>
+          <dt>Endurance</dt>
+          <dd>{{ char.endurance }} / {{ char.endurance_max }}</dd>
+        </div>
+        {% if char.current_scene_number %}
+        <div>
+          <dt>Scene</dt>
+          <dd>{{ char.current_scene_number }}</dd>
+        </div>
+        {% endif %}
+        {% if char.death_count > 0 %}
+        <div>
+          <dt>Deaths</dt>
+          <dd>{{ char.death_count }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+
+      <footer>
+        {% if char.has_active_wizard %}
+          <a href="/ui/characters/{{ char.id }}/wizard" role="button" class="secondary">Continue Setup</a>
+        {% else %}
+          <a href="/ui/game/{{ char.id }}" role="button" class="secondary">Play</a>
+        {% endif %}
+      </footer>
+    </article>
+    {% endfor %}
+  {% else %}
+    <article>
+      <p>You have no characters yet. Create one to begin your adventure!</p>
+      <a href="/ui/characters/roll" role="button">Create Your First Character</a>
+    </article>
+  {% endif %}
+</section>
+{% endblock %}

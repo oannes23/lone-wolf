@@ -1,0 +1,29 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Leaderboards{% endblock %}
+
+{% block content %}
+<section>
+  <h1>Leaderboards</h1>
+
+  <div style="margin-bottom: 1rem;">
+    <label for="book-filter">Filter by Book</label>
+    <select
+      id="book-filter"
+      name="book_id"
+      hx-get="/ui/leaderboards"
+      hx-target="#leaderboard-content"
+      hx-trigger="change"
+      hx-push-url="false">
+      <option value="">Overall</option>
+      {% for book in books %}
+      <option value="{{ book.id }}" {% if selected_book_id == book.id %}selected{% endif %}>{{ book.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div id="leaderboard-content">
+    {% include "leaderboards/_content.html" %}
+  </div>
+</section>
+{% endblock %}

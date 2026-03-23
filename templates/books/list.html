@@ -1,0 +1,30 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Books{% endblock %}
+
+{% block content %}
+<section>
+  <h1>Books</h1>
+  <p>The Lone Wolf adventure series.</p>
+
+  {% if books %}
+  <div class="book-grid">
+    {% for book in books %}
+    <article>
+      <header>
+        <hgroup>
+          <h2><a href="/ui/books/{{ book.id }}">Book {{ book.number }}: {{ book.title }}</a></h2>
+          <p>{{ book.era | capitalize }} era</p>
+        </hgroup>
+      </header>
+      <footer>
+        <a href="/ui/books/{{ book.id }}" role="button" class="outline">View Details</a>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No books available yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

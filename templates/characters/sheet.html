@@ -1,0 +1,116 @@
+{% extends "layout/player.html" %}
+
+{% block title %}{{ character.name }}{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>{{ character.name }}</h1>
+      <p>{{ character.book_title }}{% if character.current_scene_number %} &mdash; Scene {{ character.current_scene_number }}{% endif %}</p>
+    </hgroup>
+    <nav>
+      <ul>
+        <li><a href="/ui/characters/{{ character.id }}/history" role="button" class="outline">History</a></li>
+        {% if character.current_scene_number %}
+        <li><a href="/ui/game/{{ character.id }}" role="button">Play</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </header>
+
+  {% if not character.is_alive %}
+  <div class="alert" role="alert" style="color: var(--pico-del-color);">
+    This character has died {{ character.death_count }} time(s).
+  </div>
+  {% endif %}
+
+  {% if character.active_wizard %}
+  <div class="alert" role="alert">
+    <strong>Wizard in progress:</strong> {{ character.active_wizard.type }} &mdash; step {{ character.active_wizard.step_index + 1 }} of {{ character.active_wizard.total_steps }} ({{ character.active_wizard.step }})
+    <a href="/ui/characters/{{ character.id }}/wizard" role="button" class="outline" style="margin-left: 1rem;">Continue</a>
+  </div>
+  {% endif %}
+
+  <section>
+    <h2>Stats</h2>
+    <dl>
+      <dt>Combat Skill</dt>
+      <dd>{{ character.combat_skill_base }}</dd>
+
+      <dt>Endurance</dt>
+      <dd>{{ character.endurance_current }} / {{ character.endurance_max }} (base {{ character.endurance_base }})</dd>
+
+      <dt>Gold Crowns</dt>
+      <dd>{{ character.gold }}</dd>
+
+      <dt>Meals</dt>
+      <dd>{{ character.meals }}</dd>
+
+      <dt>Deaths</dt>
+      <dd>{{ character.death_count }}</dd>
+
+      <dt>Current Run</dt>
+      <dd>{{ character.current_run }}</dd>
+
+      <dt>Current Scene</dt>
+      <dd>{% if character.current_scene_number %}Scene {{ character.current_scene_number }}{% else %}Not started{% endif %}</dd>
+
+      {% if character.scene_phase %}
+      <dt>Scene Phase</dt>
+      <dd>{{ character.scene_phase }}</dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  <section>
+    <h2>Disciplines</h2>
+    {% if character.disciplines %}
+    <table>
+      <thead>
+        <tr>
+          <th>Discipline</th>
+          <th>Weapon Category</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for disc in character.disciplines %}
+        <tr>
+          <td>{{ disc.name }}</td>
+          <td>{{ disc.weapon_category if disc.weapon_category else "&mdash;" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No disciplines yet.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Equipment</h2>
+    {% if character.items %}
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Type</th>
+          <th>Equipped</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in character.items %}
+        <tr>
+          <td>{{ item.item_name }}</td>
+          <td>{{ item.item_type }}</td>
+          <td>{% if item.is_equipped %}Yes{% else %}No{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No items yet.</p>
+    {% endif %}
+  </section>
+</article>
+{% endblock %}

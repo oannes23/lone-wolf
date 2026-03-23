@@ -1,0 +1,19 @@
+<div id="stats-display">
+  {% if roll %}
+  <dl class="stat-grid">
+    <div>
+      <dt>Combat Skill</dt>
+      <dd class="stat-value">{{ roll.combat_skill }}</dd>
+      <dd class="stat-formula"><small>{{ roll.cs_formula }}</small></dd>
+    </div>
+    <div>
+      <dt>Endurance</dt>
+      <dd class="stat-value">{{ roll.endurance }}</dd>
+      <dd class="stat-formula"><small>{{ roll.end_formula }}</small></dd>
+    </div>
+  </dl>
+
+  <input type="hidden" name="roll_token" value="{{ roll.roll_token }}">
+  <input type="hidden" name="book_id" value="{{ roll.book_id }}">
+  {% endif %}
+</div>

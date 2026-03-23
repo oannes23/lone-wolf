@@ -1,0 +1,179 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Create Character{% endblock %}
+
+{% block head %}
+<style>
+  .discipline-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+  .discipline-item label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+  .discipline-item input[type="checkbox"] {
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+  }
+  #discipline-counter {
+    font-weight: bold;
+  }
+  #discipline-counter.over-limit {
+    color: var(--pico-color-red-550, #e74c3c);
+  }
+  #weapon-skill-type-group {
+    display: none;
+    margin-top: 1rem;
+  }
+  #weapon-skill-type-group.visible {
+    display: block;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section>
+  <h1>Create Your Character</h1>
+
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/ui/characters/create" id="create-form">
+    <input type="hidden" name="roll_token" value="{{ roll_token }}">
+    <input type="hidden" name="book_id" value="{{ book_id }}">
+
+    <label for="name">Character Name</label>
+    <input
+      type="text"
+      id="name"
+      name="name"
+      required
+      minlength="1"
+      maxlength="100"
+      placeholder="Enter your character's name"
+      autofocus>
+
+    <fieldset>
+      <legend>
+        Kai Disciplines
+        <span aria-live="polite">
+          — choose exactly 5
+          (<span id="discipline-counter">0</span> selected)
+        </span>
+      </legend>
+
+      <div class="discipline-grid" role="group" aria-label="Kai disciplines">
+        {% for disc in disciplines %}
+        <div class="discipline-item">
+          <label>
+            <input
+              type="checkbox"
+              name="discipline_ids"
+              value="{{ disc.id }}"
+              class="discipline-checkbox"
+              aria-describedby="disc-{{ disc.id }}-desc">
+            <span>
+              <strong>{{ disc.name }}</strong>
+              <br>
+              <small id="disc-{{ disc.id }}-desc">{{ disc.description }}</small>
+            </span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <div id="weapon-skill-type-group" aria-hidden="true">
+      <label for="weapon_skill_type">Weaponskill Type</label>
+      <select id="weapon_skill_type" name="weapon_skill_type">
+        <option value="">-- Select weapon type --</option>
+        {% for category in weapon_categories %}
+        <option value="{{ category }}">{{ category }}</option>
+        {% endfor %}
+      </select>
+      <small>Required when Weaponskill discipline is selected.</small>
+    </div>
+
+    <button type="submit" id="submit-btn" disabled>Create Character</button>
+    <p><small>You must select exactly 5 disciplines to continue.</small></p>
+  </form>
+
+  <p><a href="/ui/characters/roll?book_id={{ book_id }}">&larr; Re-roll stats</a></p>
+</section>
+
+<script>
+(function () {
+  var MAX_DISCIPLINES = 5;
+  var checkboxes = document.querySelectorAll('.discipline-checkbox');
+  var counter = document.getElementById('discipline-counter');
+  var submitBtn = document.getElementById('submit-btn');
+  var weaponGroup = document.getElementById('weapon-skill-type-group');
+  var weaponSelect = document.getElementById('weapon_skill_type');
+
+  function getSelectedCount() {
+    var count = 0;
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (checkboxes[i].checked) count++;
+    }
+    return count;
+  }
+
+  function isWeaponskillChecked() {
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (checkboxes[i].checked && checkboxes[i].closest('.discipline-item').querySelector('strong').textContent.trim() === 'Weaponskill') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function updateUI() {
+    var count = getSelectedCount();
+    counter.textContent = count;
+
+    if (count > MAX_DISCIPLINES) {
+      counter.classList.add('over-limit');
+    } else {
+      counter.classList.remove('over-limit');
+    }
+
+    var valid = (count === MAX_DISCIPLINES);
+    submitBtn.disabled = !valid;
+
+    // Show/hide weapon skill type selector
+    var showWeapon = isWeaponskillChecked();
+    if (showWeapon) {
+      weaponGroup.classList.add('visible');
+      weaponGroup.setAttribute('aria-hidden', 'false');
+      weaponSelect.setAttribute('required', 'required');
+    } else {
+      weaponGroup.classList.remove('visible');
+      weaponGroup.setAttribute('aria-hidden', 'true');
+      weaponSelect.removeAttribute('required');
+      weaponSelect.value = '';
+    }
+
+    // Disable unchecked boxes when at limit
+    for (var i = 0; i < checkboxes.length; i++) {
+      if (!checkboxes[i].checked && count >= MAX_DISCIPLINES) {
+        checkboxes[i].disabled = true;
+      } else {
+        checkboxes[i].disabled = false;
+      }
+    }
+  }
+
+  for (var i = 0; i < checkboxes.length; i++) {
+    checkboxes[i].addEventListener('change', updateUI);
+  }
+
+  updateUI();
+})();
+</script>
+{% endblock %}

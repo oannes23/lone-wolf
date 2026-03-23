@@ -2,7 +2,7 @@
 
 **Phase**: 5
 **Dependencies**: Epics 6, 7
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 Mobile-first responsive player interface. Built with HTMX for dynamic interactions, Jinja2 for server-side rendering, and Pico CSS for classless/semantic styling. No JavaScript frameworks, no build step. All assets vendored locally.
 
@@ -28,7 +28,7 @@ Mobile-first responsive player interface. Built with HTMX for dynamic interactio
 
 ## Story 8.1: UI Scaffolding & Auth Pages
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -69,7 +69,7 @@ Base template, layout, authentication pages, and session management.
 
 ## Story 8.2: Character Creation UI
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -110,7 +110,7 @@ Multi-step character creation flow: roll stats → name + disciplines → equipm
 
 ## Story 8.3: Scene & Choices UI
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -156,7 +156,7 @@ Core gameplay scene display with narrative, phase results, choices, and special 
 
 ## Story 8.4: Combat & Random UI
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -191,7 +191,7 @@ Combat round-by-round display and random number rolling interface.
 
 ## Story 8.5: Items & Inventory UI
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -229,7 +229,7 @@ Pending item accept/decline and full inventory management interface.
 
 ## Story 8.6: Character Sheet, History & Browse
 
-**Status**: Not Started
+**Status**: Complete (2026-03-22)
 
 ### Description
 
@@ -274,9 +274,15 @@ Character detail views, decision history, book advance wizard, and content brows
 ### UI Route Layer
 
 The UI routes are thin wrappers that:
-1. Call the JSON API endpoints internally (using the same service layer)
+1. Call the service layer directly (same DB session, no internal HTTP round-trip)
 2. Render Jinja2 templates with the response data
 3. Handle session cookies for auth
+
+Note: the epic description says "calls JSON API internally" but Story 8.1 calls the service
+layer directly (e.g., `db.query(User)`, `hash_password`, `verify_password`). This is the
+correct approach — internal HTTP calls would add unnecessary latency and coupling. The
+MASTER.md architectural note ("calls the API internally") is intentionally loose; direct
+service calls satisfy that intent. No spec change needed.
 
 ```python
 @router.get("/game/{character_id}")
@@ -303,3 +309,76 @@ Minimal additions beyond Pico:
 - Combat display layout
 - Sticky inventory drawer on mobile
 - "Required" badge for mandatory items
+
+---
+
+### Tech Writer Notes — Phase 2 Review (2026-03-22)
+
+Stories 8.2, 8.3, and 8.6 reviewed against all templates and router code.
+
+**Terminology**: Game terminology (Scene, Choice, Discipline, Combat Skill, Endurance, Gold Crowns, Meals, Run, Phase) is used correctly throughout all templates. No implementation-vocabulary leakage detected. "Encyclopedia" label in nav (`layout/player.html`) is consistent with the game objects browse pages (`game_objects/list.html` title, `game_objects/detail.html` back-link label). This is a player-friendly label rather than the spec term "Game Object" — appropriate for the UI layer.
+
+**Template naming**: All templates specified in Stories 8.2, 8.3, and 8.6 are present and correctly named. Two additional partial templates were added (`characters/partials/stats_display.html` for HTMX stat roll fragment, `characters/history_rows.html` for HTMX "Load More" rows). These are code-ahead additions not in the spec; both are correct design choices.
+
+**Route paths**: All UI route prefixes are consistent. Characters router uses `/ui/characters/*`. Browse router uses `/ui/books/*`, `/ui/game-objects/*`, `/ui/leaderboards`. Gameplay router uses `/ui/game/*`. No overlap or ambiguity.
+
+**Bugs found (require fixes before claiming Story AC):**
+
+1. **Dead link in sheet.html** — `templates/characters/sheet.html` line 16: `href="/ui/characters/{{ character.id }}/play"`. Route `/ui/characters/{id}/play` does not exist. Correct URL is `/ui/game/{{ character.id }}`.
+
+2. **Missing `scene_id_int` in template context** — `templates/gameplay/scene.html` line 215 references `{{ scene_id_int if scene_id_int else 0 }}` in the bug report form, but `scene_id_int` is never added to the template context by `gameplay.py`'s `scene_page()`. The `SceneResponse` schema has no `scene_id` field. Result: every submitted bug report records `scene_id = 0`. Fix: pass `scene_id_int` in context (requires adding `scene_id` to `SceneResponse` or resolving it in the router from `character.current_scene_id`).
+
+3. **Missing advance wizard sub-routes** — `templates/characters/wizard_disciplines.html`, `wizard_inventory.html`, and `wizard_advance_confirm.html` POST to `/ui/characters/{id}/wizard/disciplines`, `/ui/characters/{id}/wizard/inventory`, and `/ui/characters/{id}/wizard/confirm` respectively. None of these sub-routes are registered in `app/routers/ui/characters.py`. The router handles `POST /ui/characters/{character_id}/wizard` only (which covers `pick_equipment` and `confirm` steps for the creation wizard). The advance wizard steps need their own route handlers.
+
+4. **Missing advance route in gameplay router** — `templates/gameplay/scene.html` references `action="/ui/game/{{ character.id }}/advance"` in the victory panel. This route (`POST /ui/game/{character_id}/advance`) does not exist in `app/routers/ui/gameplay.py`. This means clicking "Advance to Next Book" will 404.
+
+Items 3 and 4 are Story 8.6 scope (book advance wizard). Items 1 and 2 are Story 8.6 and Story 8.3 scope respectively. Stories should be marked Complete only after these are resolved.
+
+---
+
+### Tech Writer Notes — Final Review (2026-03-22)
+
+All 6 stories reviewed against all templates and router code. Epic 8 is **Complete**.
+
+**All four Phase 2 bugs resolved:**
+
+1. Dead link in `sheet.html` — Fixed. `href="/ui/characters/{{ character.id }}/play"` is now `href="/ui/game/{{ character.id }}"`.
+
+2. `scene_id_int` in template context — Fixed. The bug report form (`scene.html` line 513) now reads `character.current_scene_id` directly from the ORM character object passed in template context. No `scene_id_int` variable needed.
+
+3. Advance wizard sub-routes — Fixed. All advance wizard templates (`wizard_disciplines.html`, `wizard_inventory.html`, `wizard_advance_confirm.html`) POST to the unified `/ui/characters/{id}/wizard` endpoint using a hidden `step` field. The `wizard_post` handler in `app/routers/ui/characters.py` dispatches on `step` value and handles all four cases: `pick_equipment`, `confirm`, `pick_disciplines`, `inventory_adjust`. No sub-routes needed or present — the unified endpoint pattern is correct.
+
+4. Missing advance route in gameplay router — Fixed. `POST /ui/game/{character_id}/advance` is implemented at line 373 of `app/routers/ui/gameplay.py`. On success it calls `init_book_advance_wizard()` and redirects to `/ui/characters/{character_id}/wizard`.
+
+**Stories 8.4 and 8.5 implementation approach:**
+
+Stories 8.4 (Combat & Random UI) and 8.5 (Items & Inventory UI) were implemented as sections within `templates/gameplay/scene.html` rather than as separate template files. The spec described `templates/gameplay/combat.html`, `templates/gameplay/random.html`, `templates/gameplay/items.html`, and `templates/gameplay/inventory.html` as separate files. The implementation merges all phases into one scene template using conditional blocks (`{% if scene.phase == "combat" %}`, `{% elif scene.pending_items %}`, etc.) and an always-visible inventory drawer `<details>` element.
+
+This is a valid architecture divergence: the single-template approach avoids redirect chains between phase templates and keeps all game state visible. The acceptance criteria for both stories are satisfied within `scene.html`. No separate template files were created for these stories — this is a **code-ahead** pattern where implementation differs structurally from spec while meeting all behavioral requirements.
+
+**Item management in scene.html**: The inventory drawer includes drop/equip/unequip buttons (Stories 8.5 AC) posting to `/ui/game/{id}/item/drop`, `/ui/game/{id}/item/equip`, `/ui/game/{id}/item/unequip`, and `/ui/game/{id}/item/use`. All routes are registered in `app/routers/ui/gameplay.py`. Pending item accept/decline posts to `/ui/game/{id}/item/accept` and `/ui/game/{id}/item/decline`. All item management AC is met.
+
+**Combat UI in scene.html**: Enemy and hero endurance bars, Fight button, Psi-surge toggle (conditional on discipline), Evasion button (conditional on `combat.can_evade`), evasion-hint text (when not yet evadable), and round counter are all present. All combat AC is met.
+
+**Random roll in scene.html**: Choice-triggered random, phase-based random, and combined states are handled. Roll button posts to `/ui/game/{id}/roll`. All roll AC is met.
+
+**Terminology verification**: All templates use canonical glossary terms throughout. Confirmed:
+- "Encyclopedia" used in nav (`layout/player.html`) and page heading (`game_objects/list.html`). Correct player-facing label; the internal "Game Object" spec term does not appear in player-facing UI.
+- Filter label in encyclopedia is "Type" (`game_objects/list.html` line 11) — not "Kind". This is a deliberate player-friendly label. "Kind" appears only in the detail page `<dl>` under "Related Entities" as a technical display item (`game_objects/detail.html` line 24), which is acceptable.
+- "Scene" used throughout (not "section"). "Choice" used (not "option"). "Discipline" used. "Combat Skill" / "CS" used. "Endurance" / "END" used. "Gold Crowns" / "Gold" used. "Meals" used. "Run" used in history filter. "Phase" used in stats display.
+- "Special Items" label in inventory drawer is consistent with the glossary definition of "Special item".
+
+**Template naming verification**: All templates specified in Stories 8.1–8.6 are present. Two code-ahead partial templates added: `characters/partials/stats_display.html`, `characters/history_rows.html`. One code-ahead template added: `game_objects/_results.html` (HTMX results partial). One code-ahead partial: `leaderboards/_content.html` (HTMX book-filter partial). All additions are sound design decisions.
+
+**Route path verification**:
+- `/ui/login`, `/ui/register`, `/ui/logout`, `/ui/change-password` — auth (Story 8.1)
+- `/ui/characters`, `/ui/characters/roll`, `/ui/characters/create`, `/ui/characters/{id}/wizard`, `/ui/characters/{id}/sheet`, `/ui/characters/{id}/history` — character management
+- `/ui/game/{id}`, `/ui/game/{id}/choose`, `/ui/game/{id}/restart`, `/ui/game/{id}/replay`, `/ui/game/{id}/advance`, `/ui/game/{id}/combat/round`, `/ui/game/{id}/combat/evasion`, `/ui/game/{id}/roll`, `/ui/game/{id}/item/accept`, `/ui/game/{id}/item/decline`, `/ui/game/{id}/item/drop`, `/ui/game/{id}/item/equip`, `/ui/game/{id}/item/unequip`, `/ui/game/{id}/item/use`, `/ui/game/{id}/report` — gameplay
+- `/ui/books`, `/ui/books/{id}`, `/ui/game-objects`, `/ui/game-objects/{id}`, `/ui/leaderboards` — browse
+No overlaps. All routes confirmed registered in the respective router modules.
+
+**Docstring/comment accuracy**: All route docstrings accurately describe behavior. The `scene.html` comment on narrative `| safe` (line 55) correctly documents the trust boundary. The Psi-surge JS block (lines 249–260) is accurate. No misleading comments found.
+
+**Minor note**: `game_objects/detail.html` line 25 displays `obj.kind` under "Kind" label in the `<dl>`, which exposes the internal `Kind` taxonomy term to players. This is a detail page only visible after a user selects a result. The exposure is minor and acceptable — it mirrors the filter label "Type" used on the list page. The inconsistency between "Type" (list page filter) and "Kind" (detail page data label) is noted for future consistency pass but does not block Epic completion.
+
+**Spec deviation recorded**: Stories 8.4 and 8.5 template structure diverges from spec (merged into `scene.html` rather than separate files). All AC met; deviation is intentional and preferable.

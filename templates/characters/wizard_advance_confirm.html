@@ -1,0 +1,54 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Confirm Advance{% endblock %}
+
+{% block content %}
+<article>
+  <header>
+    <hgroup>
+      <h1>Book Advance</h1>
+      <p>Step {{ wizard.step_index + 1 }} of {{ wizard.total_steps }}: Confirm</p>
+    </hgroup>
+  </header>
+
+  <p>Review your selections before advancing to the next book.</p>
+
+  <section>
+    <h2>Character Preview</h2>
+    <dl>
+      <dt>Name</dt>
+      <dd>{{ preview.name }}</dd>
+
+      <dt>Combat Skill</dt>
+      <dd>{{ preview.combat_skill_base }}</dd>
+
+      <dt>Endurance</dt>
+      <dd>{{ preview.endurance_current }} / {{ preview.endurance_max }}</dd>
+
+      <dt>Gold</dt>
+      <dd>{{ preview.gold }}</dd>
+
+      <dt>Meals</dt>
+      <dd>{{ preview.meals }}</dd>
+    </dl>
+  </section>
+
+  {% if preview.disciplines %}
+  <section>
+    <h2>Disciplines</h2>
+    <ul>
+      {% for disc in preview.disciplines %}
+      <li>{{ disc }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <form method="post" action="/ui/characters/{{ character_id }}/wizard">
+    <input type="hidden" name="step" value="confirm">
+    <input type="hidden" name="version" value="{{ version }}">
+
+    <button type="submit">Confirm and Advance</button>
+  </form>
+</article>
+{% endblock %}

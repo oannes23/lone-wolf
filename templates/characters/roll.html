@@ -1,0 +1,41 @@
+{% extends "layout/player.html" %}
+
+{% block title %}Roll Stats{% endblock %}
+
+{% block content %}
+<section>
+  <h1>Roll Your Stats</h1>
+  <p>Your Combat Skill and Endurance are determined by rolling a random number added to a base value.</p>
+
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if roll %}
+  <article>
+    {% include "characters/partials/stats_display.html" %}
+
+    <div class="roll-actions">
+      <button
+        hx-post="/ui/characters/roll"
+        hx-target="#stats-display"
+        hx-swap="outerHTML"
+        hx-indicator="#roll-indicator"
+        type="button"
+        class="secondary">
+        Roll Again
+      </button>
+      <span id="roll-indicator" class="htmx-indicator" aria-live="polite">Rolling&hellip;</span>
+    </div>
+
+    <form method="get" action="/ui/characters/create">
+      <input type="hidden" name="roll_token" value="{{ roll.roll_token }}">
+      <input type="hidden" name="book_id" value="{{ roll.book_id }}">
+      <button type="submit">Accept &amp; Continue</button>
+    </form>
+  </article>
+  {% endif %}
+
+  <p><a href="/ui/characters">&larr; Back to characters</a></p>
+</section>
+{% endblock %}

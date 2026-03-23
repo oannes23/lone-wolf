@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block body %}
+  <!-- Mobile navigation (hamburger) -->
+  <nav>
+    <div class="nav-mobile">
+      <details>
+        <summary>
+          <strong>Lone Wolf</strong>
+          <span aria-hidden="true">&#9776;</span>
+        </summary>
+        <ul>
+          <li><a href="/ui/characters">Characters</a></li>
+          <li><a href="/ui/books">Books</a></li>
+          <li><a href="/ui/game-objects">Encyclopedia</a></li>
+          <li><a href="/ui/leaderboards">Leaderboards</a></li>
+          <li><hr></li>
+          <li><a href="/ui/change-password">Change Password</a></li>
+          <li><a href="/ui/logout">Log Out</a></li>
+          <li>
+            <button
+              class="theme-toggle"
+              onclick="toggleTheme()"
+              aria-label="Switch to light mode">
+              Light
+            </button>
+          </li>
+        </ul>
+      </details>
+    </div>
+
+    <!-- Desktop navigation -->
+    <div class="nav-desktop">
+      <ul>
+        <li><strong><a href="/ui/characters">Lone Wolf</a></strong></li>
+      </ul>
+      <ul>
+        <li><a href="/ui/characters">Characters</a></li>
+        <li><a href="/ui/books">Books</a></li>
+        <li><a href="/ui/game-objects">Encyclopedia</a></li>
+        <li><a href="/ui/leaderboards">Leaderboards</a></li>
+        <li><a href="/ui/change-password" class="nav-account">Account</a></li>
+        <li><a href="/ui/logout" class="nav-account">Log Out</a></li>
+        <li>
+          <button
+            class="theme-toggle"
+            onclick="toggleTheme()"
+            aria-label="Switch to light mode">
+            Light
+          </button>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+{% endblock %}

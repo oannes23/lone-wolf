@@ -1,0 +1,91 @@
+{% if leaderboard %}
+
+{% if selected_book_id %}
+<h2>{{ leaderboard.book.title }}</h2>
+<p>{{ leaderboard.completions }} completion(s)</p>
+{% else %}
+<h2>Overall</h2>
+<p>{{ leaderboard.total_completions }} total completion(s) across {{ leaderboard.total_characters }} character(s)</p>
+{% endif %}
+
+{% if fewest_deaths %}
+<section>
+  <h2>Fewest Deaths</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Player</th>
+        <th>Deaths</th>
+        <th>Decisions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in fewest_deaths %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ entry.username }}</td>
+        <td>{{ entry.death_count }}</td>
+        <td>{{ entry.decisions }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if fewest_decisions %}
+<section>
+  <h2>Fewest Decisions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Player</th>
+        <th>Decisions</th>
+        <th>Deaths</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in fewest_decisions %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ entry.username }}</td>
+        <td>{{ entry.decisions }}</td>
+        <td>{{ entry.death_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if highest_endurance %}
+<section>
+  <h2>Highest Endurance at Victory</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Player</th>
+        <th>Endurance</th>
+        <th>Deaths</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in highest_endurance %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ entry.username }}</td>
+        <td>{{ entry.endurance }}</td>
+        <td>{{ entry.death_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% else %}
+<p>No leaderboard data available yet.</p>
+{% endif %}

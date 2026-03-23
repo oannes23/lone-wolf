@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Log In{% endblock %}
+
+{% block body %}
+  <main>
+    <section class="auth-container">
+      <h1>Lone Wolf</h1>
+      <p class="auth-flavor"><em>You are the last of the Kai Lords&hellip;</em></p>
+
+      {% if error %}
+      <div class="alert alert-error" role="alert">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/ui/login">
+        <label for="username">Username</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          autocomplete="username"
+          required
+          autofocus>
+
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          autocomplete="current-password"
+          required>
+
+        <button type="submit">Log In</button>
+      </form>
+
+      <div class="auth-links">
+        <a href="/ui/register">Create an account</a>
+      </div>
+    </section>
+  </main>
+{% endblock %}
