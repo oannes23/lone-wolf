@@ -71,7 +71,10 @@ def upsert_with_source(
     existing = db.query(model).filter_by(**filters).one_or_none()
 
     if existing is None:
-        instance = model(**data)
+        # Strip keys that don't exist as columns on the model
+        valid_cols = {c.key for c in model.__table__.columns}
+        filtered = {k: v for k, v in data.items() if k in valid_cols}
+        instance = model(**filtered)
         db.add(instance)
         return instance
 
@@ -80,8 +83,10 @@ def upsert_with_source(
         return existing
 
     # Auto row — update all fields from data
+    valid_cols = {c.key for c in model.__table__.columns}
     for field, value in data.items():
-        setattr(existing, field, value)
+        if field in valid_cols:
+            setattr(existing, field, value)
     return existing
 
 

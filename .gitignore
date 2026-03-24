@@ -1,6 +1,8 @@
 # Source data (used for import only, not stored in repo)
 all-books-simple.zip
 all-books-svg.zip
+books/
+merge_report_*.json
 
 # Python
 __pycache__/

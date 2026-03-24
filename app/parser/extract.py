@@ -101,6 +101,84 @@ def extract_book_metadata(xhtml_path: str | Path) -> BookData:
 # Scenes
 # ---------------------------------------------------------------------------
 
+def _expand_numbered_blocks(blocks: list[Tag]) -> list[Tag]:
+    """Split container blocks that hold multiple scenes into virtual per-scene Tags.
+
+    Some Project Aon HTML formats use a single ``<div class="numbered">``
+    wrapper around all 350 scenes, where each scene starts with an ``<h3>``
+    tag containing a ``<a name="sect{N}">`` anchor.  When we detect this
+    pattern (one block with many ``<h3>`` children), we split the block's
+    children into separate BeautifulSoup Tags, one per scene.
+    """
+    from bs4 import NavigableString
+
+    expanded: list[Tag] = []
+
+    for block in blocks:
+        if not isinstance(block, Tag):
+            continue
+
+        h3_tags = block.find_all("h3", recursive=False)
+        # If there's at most one h3, the block already represents a single scene
+        if len(h3_tags) <= 1:
+            expanded.append(block)
+            continue
+
+        # Split children by <h3> delimiters into virtual scene blocks
+        current_children: list[Tag | NavigableString] = []
+        for child in block.children:
+            if isinstance(child, Tag) and child.name == "h3":
+                # Flush accumulated children as a virtual block (if any
+                # contain a sect anchor, they form the prior scene)
+                if current_children:
+                    virtual = _make_virtual_block(current_children)
+                    if virtual is not None:
+                        expanded.append(virtual)
+                current_children = [child]
+            else:
+                current_children.append(child)
+
+        # Flush the last scene
+        if current_children:
+            virtual = _make_virtual_block(current_children)
+            if virtual is not None:
+                expanded.append(virtual)
+
+    return expanded
+
+
+def _make_virtual_block(children: list[Tag]) -> Tag | None:  # type: ignore[type-arg]
+    """Wrap a list of child elements in a new ``<div>`` Tag for scene extraction.
+
+    Returns None if no sect anchor is found (e.g. the header block before
+    the first scene).
+    """
+    from copy import copy
+
+    from bs4 import BeautifulSoup as BS
+
+    # Quick check: does this group contain a sect anchor?
+    has_sect = False
+    for child in children:
+        if isinstance(child, Tag):
+            a = child.find("a", attrs={"name": re.compile(r"^sect\d+$")})
+            if a:
+                has_sect = True
+                break
+            if child.get("id", "") and re.match(r"^sect\d+$", str(child.get("id", ""))):
+                has_sect = True
+                break
+    if not has_sect:
+        return None
+
+    wrapper = BS("<div></div>", "html.parser").find("div")
+    if not isinstance(wrapper, Tag):
+        return None
+    for child in children:
+        wrapper.append(copy(child))
+    return wrapper
+
+
 def extract_scenes(soup: BeautifulSoup) -> list[SceneData]:
     """Extract all numbered scenes from an already-parsed BeautifulSoup tree.
 
@@ -126,7 +204,11 @@ def extract_scenes(soup: BeautifulSoup) -> list[SceneData]:
         logger.debug("No numbered blocks found in document")
         return scenes
 
-    for block in blocks:
+    # Expand blocks: if a single container holds multiple scenes (each
+    # delimited by <h3><a name="sect{N}">), split it into virtual blocks.
+    expanded = _expand_numbered_blocks(blocks)
+
+    for block in expanded:
         if not isinstance(block, Tag):
             continue
 
@@ -291,7 +373,7 @@ def _resolve_choice_target(p: Tag, raw_text: str) -> int | None:
 # ---------------------------------------------------------------------------
 
 _COMBAT_RE = re.compile(
-    r"(.+?):\s*COMBAT SKILL\s*(\d+)\s+ENDURANCE\s*(\d+)",
+    r"(.+?):\s*COMBAT[\s\xa0]+SKILL\s*(\d+)[\s\xa0]+ENDURANCE\s*(\d+)",
     re.IGNORECASE,
 )
 
@@ -339,7 +421,10 @@ def extract_combat_encounters(scene_soup: Tag) -> list[CombatData]:
 # ---------------------------------------------------------------------------
 
 _KILL_RE = re.compile(r"^k$", re.IGNORECASE)
-_RATIO_HEADER_RE = re.compile(r"^([+-]?\d+)\s+to\s+([+-]?\d+)$", re.IGNORECASE)
+_RATIO_HEADER_RE = re.compile(
+    r"^([+\-\u2212]?\d+)\s*(?:to|/)\s*([+\-\u2212]?\d+)$",
+    re.IGNORECASE,
+)
 
 
 def extract_crt(soup: BeautifulSoup) -> list[CRTRow]:
@@ -388,6 +473,18 @@ def extract_crt(soup: BeautifulSoup) -> list[CRTRow]:
                     table = t
                     break
 
+    # Strategy 2b: anchor may be inside an <h2>; search siblings of the parent
+    if table is None and anchor.parent and isinstance(anchor.parent, Tag):
+        for sibling in anchor.parent.next_siblings:
+            if isinstance(sibling, Tag):
+                if sibling.name == "table":
+                    table = sibling
+                    break
+                t = sibling.find("table")
+                if t and isinstance(t, Tag):
+                    table = t
+                    break
+
     # Strategy 3: search from anchor's parent element downward
     if table is None and anchor.parent and isinstance(anchor.parent, Tag):
         t = anchor.parent.find("table")
@@ -407,20 +504,25 @@ def _parse_crt_table(table: Tag) -> list[CRTRow]:
     if not rows_tags:
         return []
 
-    # First row is the header — extract ratio bracket columns
-    header_cells = rows_tags[0].find_all(["th", "td"])
+    # Find the header row containing ratio brackets.  Some HTML layouts put
+    # the ratio brackets in a later row (after tfoot content and a
+    # "Random Number / Combat Ratio" title row).
+    header_row_idx = -1
     brackets: list[tuple[int, int]] = []
-
-    for cell in header_cells[1:]:  # skip first cell ("Random Number" label)
-        text = cell.get_text(strip=True)
-        m = _RATIO_HEADER_RE.match(text)
-        if m:
-            brackets.append((int(m.group(1)), int(m.group(2))))
-        else:
-            # Try simpler single-number column (some editions)
-            if text.lstrip("+-").isdigit():
-                n = int(text)
-                brackets.append((n, n))
+    for idx, tr in enumerate(rows_tags):
+        cells = tr.find_all(["th", "td"])
+        if len(cells) < 5:  # ratio header has 13 columns typically
+            continue
+        trial: list[tuple[int, int]] = []
+        for cell in cells:
+            text = _normalise_minus(cell.get_text(strip=True))
+            trial_bracket = _parse_ratio_header(text)
+            if trial_bracket is not None:
+                trial.append(trial_bracket)
+        if len(trial) >= 5:  # found the header
+            brackets = trial
+            header_row_idx = idx
+            break
 
     if not brackets:
         logger.warning("Could not parse CRT header columns")
@@ -428,7 +530,7 @@ def _parse_crt_table(table: Tag) -> list[CRTRow]:
 
     rows: list[CRTRow] = []
 
-    for tr in rows_tags[1:]:
+    for tr in rows_tags[header_row_idx + 1:]:
         cells = tr.find_all(["td", "th"])
         if not cells:
             continue
@@ -453,6 +555,43 @@ def _parse_crt_table(table: Tag) -> list[CRTRow]:
             )
 
     return rows
+
+
+def _normalise_minus(text: str) -> str:
+    """Replace Unicode minus (U+2212) with ASCII hyphen."""
+    return text.replace("\u2212", "-")
+
+
+def _parse_ratio_header(text: str) -> tuple[int, int] | None:
+    """Parse a single CRT column header into a (min, max) bracket.
+
+    Handles formats like ``-10/ -9``, ``-11 or lower``, ``11 or higher``,
+    ``0``, and ``+3 to +5``.
+    """
+    text = text.strip()
+    # Range: "-10/ -9" or "+3 to +5"
+    m = _RATIO_HEADER_RE.match(text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # Boundary: "-11 or lower"
+    m = re.match(r"^([+\-]?\d+)\s+or\s+lower$", text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return n, n  # treated as single bracket
+
+    # Boundary: "11 or higher"
+    m = re.match(r"^([+\-]?\d+)\s+or\s+higher$", text, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        return n, n
+
+    # Single number: "0"
+    if text.lstrip("+-").isdigit():
+        n = int(text)
+        return n, n
+
+    return None
 
 
 def _parse_crt_cell(text: str) -> tuple[int | None, int | None]:
