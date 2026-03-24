@@ -27,9 +27,10 @@ def merge_combat_encounters(
     When LLM returns an empty list, manual results are passed through silently.
     When LLM is ``None`` (``--skip-llm``), manual results are passed through.
 
-    Note on field names: manual encounters use ``enemy_cs``/``enemy_end``
-    while LLM encounters use ``combat_skill``/``endurance``.  The merged
-    output normalises to ``enemy_cs``/``enemy_end``.
+    Both manual and LLM inputs use normalised ``enemy_cs``/``enemy_end``
+    field names (LLM output is normalised by ``_validate_scene_analysis``).
+    Per-encounter fields (``mindblast_immune``, ``condition_type``,
+    ``condition_value``) are carried through from LLM encounters.
 
     Args:
         manual: Combat encounter dicts from the transform phase.
@@ -82,12 +83,19 @@ def merge_combat_encounters(
     llm_names_lower = {e["enemy_name"].lower() for e in llm}
 
     for le in llm:
-        merged.append({
+        enc: dict = {
             "enemy_name": le["enemy_name"],
             "enemy_cs": le.get("enemy_cs", 0),
             "enemy_end": le.get("enemy_end", 0),
             "ordinal": le.get("ordinal", len(merged) + 1),
-        })
+        }
+        # Carry through per-encounter fields from LLM validation
+        if "mindblast_immune" in le:
+            enc["mindblast_immune"] = le["mindblast_immune"]
+        if "condition_type" in le:
+            enc["condition_type"] = le["condition_type"]
+            enc["condition_value"] = le.get("condition_value")
+        merged.append(enc)
 
     # Add manual-only encounters that LLM missed
     for me in manual:

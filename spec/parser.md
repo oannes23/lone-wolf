@@ -297,13 +297,17 @@ The primary LLM enrichment step is `app.parser.llm.analyze_scene()`, which issue
 
 - **entities** — named characters, locations, creatures, organizations (kinds)
 - **relationships** — tagged refs between entities
-- **combat_encounters** — enemy name, COMBAT SKILL, ENDURANCE, ordinal
-- **items** — item name, type, quantity, gain/lose action
-- **random_outcomes** — outcome bands (range_min/max, effect_type, effect_value)
+- **combat_encounters** — enemy name, COMBAT SKILL, ENDURANCE, ordinal, per-encounter `mindblast_immune` flag, and optional `condition_type`/`condition_value` for conditional combat (e.g. "If you do not have Camouflage, you must fight")
+- **items** — item name, type (weapon/backpack/special/gold/meal), quantity, gain/lose action
+- **random_outcomes** — outcome bands (range_min/max, effect_type, effect_value, narrative_text) plus `roll_group` (0-based index for scenes with multiple independent random tables)
 - **evasion** — rounds, target_scene, evasion_damage
 - **combat_modifiers** — modifier_type and numeric value
 - **conditions** — per-choice gate conditions (discipline, item, gold, random)
 - **scene_flags** — must_eat, loses_backpack, is_death, is_victory, mindblast_immune
+
+**effect_value format**: The LLM returns effect values as plain strings. `_format_effect_value()` in `pipeline.py` converts them to JSON objects before DB load: `scene_redirect` becomes `{"scene_number": N}`, endurance/gold/meal changes become `{"amount": N}`, item gains/losses become `{"item_name": "..."}`.
+
+**Conditional combat**: When a combat encounter is conditional (only occurs if the player lacks a discipline or item), `condition_type` and `condition_value` are set on the `combat_encounters` row. This is extracted by the LLM and validated against the same condition type allowlist as choices.
 
 The LLM is given a structured system prompt with an explicit JSON schema and validation rules. All output is validated by `_validate_scene_analysis()` before use. Individual invalid entries are silently dropped; a partially valid response still yields useful output.
 

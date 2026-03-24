@@ -614,7 +614,9 @@ def infer_relationships(
 # Scene analysis — unified structured extraction
 # ---------------------------------------------------------------------------
 
-_SCENE_ANALYSIS_VERSION = "v3"
+# IMPORTANT: Bump when the _SCENE_ANALYSIS_SYSTEM prompt or schema changes,
+# otherwise stale cached results will be served silently.
+_SCENE_ANALYSIS_VERSION = "v4"
 
 _SCENE_ANALYSIS_SYSTEM = """\
 You are analyzing a passage from a Lone Wolf choose-your-own-adventure gamebook.
@@ -642,7 +644,7 @@ Rules:
 - random_outcomes: Only if the text describes a Random Number Table with numbered outcome bands (0-9 ranges). Use roll_group 0 for the first table, 1 for a second independent table in the same scene, etc.
 - effect_value: For scene_redirect use the target scene number as a string. For endurance/gold/meal changes use a signed integer string (e.g. "-3", "+2").
 - evasion: Only if explicit evasion/escape rules are stated. Use rounds: 0 if evasion is allowed from the start of combat. Set evasion to null if none.
-- combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage/helghast.
+- combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage/helghast. enemy_mindblast means the enemy uses Mindblast against the hero (-2 CS unless hero has Mindshield). This is different from mindblast_immune on combat_encounters, which means the hero's Mindblast has no effect on the enemy.
 - conditions: Extract gate conditions from the choice text (e.g. "If you have the Kai Discipline of Tracking"). For OR conditions use JSON: {"any": ["Tracking", "Huntmastery"]}.
 - entities: Only clearly named entities, not generic references like "the guard" or "a merchant".
 - scene_flags: is_death = true if the scene ends the adventure in failure with no outgoing choices. is_victory = true if the scene completes the book/quest successfully. must_eat = true if the player must eat a meal. loses_backpack = true if the player loses their backpack contents. mindblast_immune = true if a combat enemy is immune to Mindblast. Default all to false.
@@ -655,7 +657,7 @@ Output: {"entities": [{"kind": "location", "name": "Village", "description": "A 
 
 Example — combat scene with evasion and items:
 Input: "A Kraan swoops from the sky. It is immune to Mindblast. You must fight it. Kraan: COMBAT SKILL 16 ENDURANCE 24. You may evade combat after 3 rounds by turning to 85, but you lose 2 ENDURANCE points. You find a Sword and 7 Gold Crowns. You must eat a Meal here."
-Output: {"entities": [{"kind": "creature", "name": "Kraan", "description": "A flying reptilian creature", "aliases": []}], "relationships": [], "combat_encounters": [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}], "items": [{"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"}, {"item_name": "Gold Crowns", "item_type": "gold", "quantity": 7, "action": "gain"}], "random_outcomes": [], "evasion": {"rounds": 3, "target_scene": 85, "damage": 2}, "combat_modifiers": [], "conditions": [], "scene_flags": {"must_eat": true, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": true}}"""
+Output: {"entities": [{"kind": "creature", "name": "Kraan", "description": "A flying reptilian creature", "aliases": []}], "relationships": [], "combat_encounters": [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1, "mindblast_immune": true, "condition_type": null, "condition_value": null}], "items": [{"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"}, {"item_name": "Gold Crowns", "item_type": "gold", "quantity": 7, "action": "gain"}], "random_outcomes": [], "evasion": {"rounds": 3, "target_scene": 85, "damage": 2}, "combat_modifiers": [], "conditions": [], "scene_flags": {"must_eat": true, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": true}}"""
 
 _SCENE_ANALYSIS_USER = """\
 Book {book_number}, Scene {scene_number}:
