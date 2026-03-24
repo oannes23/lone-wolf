@@ -13,17 +13,16 @@ from sqlalchemy.orm import Session
 
 from app.engine.lifecycle import restart_character, replay_book
 from app.engine.types import CharacterState
-from app.events import log_character_event
+from app.events import log_character_event, log_decision
 from app.models.content import Book, Scene
 from app.models.player import (
     Character,
     CharacterBookStart,
     CharacterDiscipline,
     CharacterItem,
-    DecisionLog,
 )
 from app.schemas.gameplay import SceneResponse
-from app.services.gameplay_service import get_scene_state
+from app.services.scene_service import get_scene_state
 
 
 def _build_minimal_char_state(character: Character) -> CharacterState:
@@ -224,36 +223,6 @@ def _apply_restored_state_to_character(
     character.updated_at = now
 
 
-def _log_decision_log_entry(
-    db: Session,
-    character: Character,
-    from_scene_id: int,
-    to_scene_id: int,
-    action_type: str,
-) -> None:
-    """Write a decision_log row for the lifecycle event.
-
-    Args:
-        db: Database session.
-        character: The character the log entry belongs to.
-        from_scene_id: The scene the character was at before.
-        to_scene_id: The start scene they are placed at.
-        action_type: Either 'restart' or 'replay'.
-    """
-    entry = DecisionLog(
-        character_id=character.id,
-        run_number=character.current_run,
-        from_scene_id=from_scene_id,
-        to_scene_id=to_scene_id,
-        choice_id=None,
-        action_type=action_type,
-        details=json.dumps({"lifecycle": action_type}),
-        created_at=datetime.now(UTC),
-    )
-    db.add(entry)
-    db.flush()
-
-
 def restart(db: Session, character: Character) -> SceneResponse:
     """Restart a dead character from their book start snapshot.
 
@@ -318,12 +287,14 @@ def restart(db: Session, character: Character) -> SceneResponse:
     )
 
     # Log decision log entry
-    _log_decision_log_entry(
+    log_decision(
         db,
         character,
         from_scene_id=original_scene_id,
         to_scene_id=start_scene.id,
+        choice_id=None,
         action_type="restart",
+        details={"lifecycle": "restart"},
     )
 
     db.flush()
@@ -411,12 +382,14 @@ def replay(db: Session, character: Character) -> SceneResponse:
     )
 
     # Log decision log entry
-    _log_decision_log_entry(
+    log_decision(
         db,
         character,
         from_scene_id=original_scene_id,
         to_scene_id=start_scene.id,
+        choice_id=None,
         action_type="replay",
+        details={"lifecycle": "replay"},
     )
 
     db.flush()

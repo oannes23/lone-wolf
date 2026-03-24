@@ -751,7 +751,7 @@ class TestAdvanceEndpointLifecycle:
             json={"version": 1},
             headers=_auth_headers(token),
         )
-        assert resp.status_code == 400, resp.json()
+        assert resp.status_code == 409, resp.json()
         assert "victory" in resp.json()["detail"].lower()
 
     def test_advance_when_no_next_book_returns_404(

@@ -16,6 +16,7 @@ Overall tracker for the Lone Wolf CYOA project. Updated as epics and stories are
 | 7 | [Content Browse, Social & Admin API](epic-7-content-api.md) | 5 | Complete | 4 | Epics 1, 2 |
 | 8 | [Player UI (HTMX + Pico CSS)](epic-8-player-ui.md) | 6 | Complete | 5 | Epics 6, 7 |
 | 9 | [Admin UI (HTMX + Pico CSS)](epic-9-admin-ui.md) | 4 | Complete | 6 | Epics 7, 8 |
+| 10 | [Refactoring & Spec Sync](epic-10-refactoring-spec-sync.md) | 7 | Complete | 7 | Epics 0-9 |
 
 ## Dependency Graph
 
@@ -144,7 +145,51 @@ Phase 6:      [E9 Admin UI]
 | 9.3 | Report Triage UI | Complete |
 | 9.4 | User & Character Management | Complete |
 
+### Epic 10: Refactoring & Spec Sync
+| Story | Name | Status |
+|-------|------|--------|
+| 10.1 | Extract State Builder Module | Complete |
+| 10.2 | Extract Choose Logic to Service | Complete |
+| 10.3 | Extract Shared Helpers (DRY fixes) | Complete |
+| 10.4 | Split gameplay_service.py into focused modules | Complete |
+| 10.5 | Spec Sync | Complete |
+| 10.6 | Normalize Version Conflict Handling | Complete |
+| 10.7 | Fix Leaderboard N+1 Queries | Complete |
+
 ## Deviations & Notes
+
+### Phase 7 Completion (2026-03-23)
+
+Epic 10 complete. All 7 stories implemented with multi-agent review gates (code-reviewer, qa-engineer, tech-writer, game-designer, architect).
+
+- **Story 10.1** — `app/services/state_builder.py` (301 lines). Extracted `build_character_state` and `build_scene_context` from gameplay_service. Broke circular import cycle. 4 deferred imports eliminated.
+- **Story 10.2** — `process_choose` extracted to service layer. API router choose endpoint: 207 → 31 lines. UI router choose handler: 164 → 14 lines.
+- **Story 10.3** — `mark_character_dead`, `recalculate_endurance_max` in state_builder.py. `log_decision` in events.py. CombatContext consolidated. All DRY violations resolved.
+- **Story 10.4** — `gameplay_service.py` split: 2009 lines → 31-line re-export facade. New modules: `scene_service.py` (406), `transition_service.py` (551), `item_service.py` (440), `roll_service.py` (584).
+- **Story 10.5** — 18 spec fixes: 14 api.md response examples, 7 new error codes, 2 data-model.md fixes, 2 MASTER.md fixes.
+- **Story 10.6** — 4 inline VersionConflictError handlers removed. All endpoints use global handler.
+- **Story 10.7** — Leaderboard N+1 queries replaced with SQL GROUP BY. Username placeholder bug fixed. 4 new tests added.
+
+**Files created**: 5 (state_builder.py, scene_service.py, transition_service.py, item_service.py, roll_service.py)
+
+**Files modified**: 11 (gameplay_service.py, combat_service.py, leaderboard_service.py, lifecycle_service.py, gameplay.py router, ui/gameplay.py router, main.py, events.py, api.md, data-model.md, MASTER.md)
+
+**Test count**: 1436 tests passing (1434 original + 4 new leaderboard tests, 2 advance tests updated 400→409).
+
+**Review findings addressed during implementation**:
+- Critical: Version double-increment in death-during-random-phase path (code-reviewer Phase 2)
+- Critical: SceneContext duplication in combat_service._advance_past_combat — 90 lines → 1 line (architect Phase 1)
+- Moderate: `_count_pending_items` missing run_number filter (code-reviewer Phase 2)
+- Moderate: ADVANCE_NOT_ALLOWED HTTP status 400 → 409 (game-designer Phase 1)
+- Minor: Dead VersionConflictError import in ui/gameplay.py (QA Phase 1)
+- Minor: data-model.md combat_rounds column table missing run_number row (tech-writer Phase 1)
+
+**Review findings deferred (pre-existing, not introduced by Epic 10)**:
+- `_get_pending_items` uses `scene_item_id` from event details, but `process_item_action` doesn't log `scene_item_id`. Items still show as pending in scene display after accept/decline. Player can still proceed (phase advances correctly). UI-only display issue.
+- `wizard_service.py` at 1417 lines exceeds the 600-line cap. Excluded from Epic 10 scope per spec (warranted complexity).
+- 2 deferred cross-service imports remain in the split architecture (scene_service.py:380, transition_service.py:55) — structurally necessary to break a genuine circular dependency cycle.
+
+---
 
 ### Phase 2 Completion (2026-03-20)
 

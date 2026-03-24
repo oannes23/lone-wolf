@@ -17,6 +17,8 @@ from app.events import log_character_event
 from app.models.content import Book, CombatEncounter, CombatResults, Scene
 from app.models.player import Character, CombatRound
 from app.schemas.gameplay import CombatRoundResponse
+from app.services.state_builder import build_character_state, build_scene_context, mark_character_dead
+from app.services.transition_service import transition_to_scene
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +55,7 @@ def _load_crt_rows(db: Session, era: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _build_combat_context(
+def build_combat_context(
     db: Session, encounter: CombatEncounter, character: Character
 ) -> tuple[CombatContext, int]:
     """Build a CombatContext DTO and determine the current round count.
@@ -137,9 +139,7 @@ def _skip_conditional_encounters(
     Returns:
         The first encounter that must be fought, or None if all are skipped.
     """
-    from app.services.gameplay_service import _build_character_state
-
-    char_state = _build_character_state(db, character)
+    char_state = build_character_state(db, character)
 
     for enc in encounters:
         enc_data = CombatEncounterData(
@@ -215,112 +215,14 @@ def _advance_past_combat(db: Session, character: Character) -> None:
         db: Active database session.
         character: The character ORM model (mutated in place).
     """
-    import json
-
     from app.engine.phases import compute_phase_sequence
-    from app.engine.types import (
-        ChoiceData,
-        RandomOutcomeData,
-        SceneContext,
-        SceneItemData,
-    )
-    from app.services.gameplay_service import _build_character_state
 
     scene = db.query(Scene).filter(Scene.id == character.current_scene_id).first()
     if scene is None:
         return
 
-    char_state = _build_character_state(db, character)
-
-    # Build minimal scene context for phase computation
-    scene_items = [
-        SceneItemData(
-            scene_item_id=si.id,
-            item_name=si.item_name,
-            item_type=si.item_type,
-            quantity=si.quantity,
-            action=si.action,
-            is_mandatory=si.is_mandatory,
-            game_object_id=si.game_object_id,
-            properties={},
-        )
-        for si in scene.scene_items
-    ]
-
-    combat_encounters = [
-        CombatEncounterData(
-            encounter_id=enc.id,
-            enemy_name=enc.enemy_name,
-            enemy_cs=enc.enemy_cs,
-            enemy_end=enc.enemy_end,
-            ordinal=enc.ordinal,
-            mindblast_immune=enc.mindblast_immune,
-            evasion_after_rounds=enc.evasion_after_rounds,
-            evasion_target=enc.evasion_target,
-            evasion_damage=enc.evasion_damage,
-            condition_type=enc.condition_type,
-            condition_value=enc.condition_value,
-            modifiers=[
-                CombatModifierData(
-                    modifier_type=m.modifier_type,
-                    modifier_value=m.modifier_value,
-                    condition=m.condition,
-                )
-                for m in enc.modifiers
-            ],
-        )
-        for enc in scene.combat_encounters
-    ]
-
-    choices = [
-        ChoiceData(
-            choice_id=c.id,
-            target_scene_id=c.target_scene_id,
-            target_scene_number=c.target_scene_number,
-            display_text=c.display_text,
-            condition_type=c.condition_type,
-            condition_value=c.condition_value,
-            has_random_outcomes=bool(c.random_outcomes),
-        )
-        for c in scene.choices
-    ]
-
-    random_outcomes = [
-        RandomOutcomeData(
-            outcome_id=ro.id,
-            roll_group=ro.roll_group,
-            range_min=ro.range_min,
-            range_max=ro.range_max,
-            effect_type=ro.effect_type,
-            effect_value=ro.effect_value,
-            narrative_text=ro.narrative_text,
-        )
-        for ro in scene.random_outcomes
-    ]
-
-    try:
-        phase_override = (
-            json.loads(scene.phase_sequence_override)
-            if scene.phase_sequence_override
-            else None
-        )
-    except (json.JSONDecodeError, TypeError):
-        phase_override = None
-
-    scene_ctx = SceneContext(
-        scene_id=scene.id,
-        book_id=scene.book_id,
-        scene_number=scene.number,
-        is_death=scene.is_death,
-        is_victory=scene.is_victory,
-        must_eat=scene.must_eat,
-        loses_backpack=scene.loses_backpack,
-        phase_sequence_override=phase_override,
-        choices=choices,
-        combat_encounters=combat_encounters,
-        scene_items=scene_items,
-        random_outcomes=random_outcomes,
-    )
+    char_state = build_character_state(db, character)
+    scene_ctx = build_scene_context(scene)
 
     phases = compute_phase_sequence(scene_ctx, char_state)
 
@@ -394,8 +296,6 @@ def resolve_round(
     Raises:
         ValueError: If the character has no active combat encounter or scene.
     """
-    from app.services.gameplay_service import _build_character_state
-
     if character.active_combat_encounter_id is None:
         raise ValueError("No active combat encounter")
 
@@ -408,8 +308,8 @@ def resolve_round(
         raise ValueError(f"Combat encounter {character.active_combat_encounter_id} not found")
 
     # Build engine DTOs
-    char_state = _build_character_state(db, character)
-    combat_ctx, rounds_fought = _build_combat_context(db, encounter, character)
+    char_state = build_character_state(db, character)
+    combat_ctx, rounds_fought = build_combat_context(db, encounter, character)
 
     # Load CRT for this era
     book = db.query(Book).filter(Book.id == character.book_id).first()
@@ -476,10 +376,7 @@ def resolve_round(
         result_str = "loss"
 
         # Mark character dead and clear phase state
-        character.is_alive = False
-        character.scene_phase = None
-        character.scene_phase_index = None
-        character.active_combat_encounter_id = None
+        mark_character_dead(character)
 
         # Log combat_end event
         combat_end_event = log_character_event(
@@ -599,8 +496,6 @@ def resolve_evasion(
     Raises:
         ValueError: If evasion is not allowed yet or no active encounter.
     """
-    from app.services.gameplay_service import _build_character_state, transition_to_scene
-
     if character.active_combat_encounter_id is None:
         raise ValueError("No active combat encounter")
 
@@ -612,8 +507,8 @@ def resolve_evasion(
     if encounter is None:
         raise ValueError(f"Combat encounter {character.active_combat_encounter_id} not found")
 
-    char_state = _build_character_state(db, character)
-    combat_ctx, rounds_fought = _build_combat_context(db, encounter, character)
+    char_state = build_character_state(db, character)
+    combat_ctx, rounds_fought = build_combat_context(db, encounter, character)
 
     # Validate evasion eligibility
     if (
@@ -649,10 +544,7 @@ def resolve_evasion(
 
     if evade_result.hero_dead:
         # Death during evasion — no transition
-        character.is_alive = False
-        character.scene_phase = None
-        character.scene_phase_index = None
-        character.active_combat_encounter_id = None
+        mark_character_dead(character)
 
         log_character_event(
             db=db,

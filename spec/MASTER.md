@@ -146,7 +146,7 @@ See [todo.md](todo.md) items 42-49 for deferred post-MVP questions. All remainin
 - ~~Item loss when missing~~ → Skip silently, log `character_event` of type `item_loss_skip`.
 - ~~Item swap during pickup~~ → Allowed. Inventory management available during items phase.
 - ~~Admin creation~~ → CLI command (`scripts/create_admin.py`).
-- ~~Token expiry~~ → 24h access, 90 day refresh.
+- ~~Token expiry~~ → 24h access, 7-day refresh.
 - ~~Concurrent requests~~ → Optimistic locking with `version` column, 409 on conflict.
 - ~~Evasion damage~~ → Per encounter, `evasion_damage` column on `combat_encounters`, default 0.
 - ~~Endurance cap~~ → Separate `endurance_max`, increased by lore-circles and permanent bonuses.
@@ -167,7 +167,7 @@ See [todo.md](todo.md) items 42-49 for deferred post-MVP questions. All remainin
 - ~~Gold deduction~~ → Auto-deduct on `/choose` for gold-gated choices.
 - ~~Discipline scoping~~ → Era-scoped. `disciplines` uses `era` column, not `book_id` FK.
 - ~~CRT scoping~~ → Era-scoped. `combat_results` uses `era` column, not `book_id` FK.
-- ~~Refresh tokens~~ → Stateless JWT, no server storage, 90-day expiry.
+- ~~Refresh tokens~~ → Stateless JWT, no server storage, 7-day expiry.
 - ~~Wizard endpoint path~~ → Single canonical path: `/characters/{id}/wizard`.
 - ~~Wizard template seed data~~ → `character_creation`: 2 steps (pick_equipment, confirm). `book_advance`: 3 steps (pick_disciplines, inventory_adjust, confirm).
 - ~~Gold/meal pickup~~ → Auto-applied during phase progression. No accept/decline needed.

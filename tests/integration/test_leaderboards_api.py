@@ -534,7 +534,150 @@ class TestBookLeaderboardLimit:
         assert response.status_code == 422
 
 
-class TestOverallLeaderboardExtended:
+class TestLeaderboardCorrectOrdering:
+    """Tests that verify correct ordering when multiple completed characters exist.
+
+    These tests specifically cover the N+1 fix — the GROUP BY aggregation must
+    produce the same ordering as the old per-character COUNT loop, and usernames
+    must be real values (not ``user_N`` placeholders).
+    """
+
+    def test_fewest_deaths_ordering_with_multiple_completers(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """fewest_deaths must rank the completer with zero deaths first."""
+        from app.models.player import User
+
+        tokens = register_and_login(client, username="lb_order_deaths_user", password="pass1234!")
+        user = db.query(User).filter(User.username == "lb_order_deaths_user").first()
+
+        book = make_book(db)
+        victory_scene = make_scene(db, book, number=350, is_victory=True)
+
+        # Three completers with different death counts
+        make_character(db, user, book, current_scene_id=victory_scene.id, death_count=3)
+        make_character(db, user, book, current_scene_id=victory_scene.id, death_count=0)
+        make_character(db, user, book, current_scene_id=victory_scene.id, death_count=1)
+        db.flush()
+
+        response = client.get(
+            f"/leaderboards/books/{book.id}",
+            headers=auth_headers(tokens["access_token"]),
+        )
+        assert response.status_code == 200
+        fewest = response.json()["fewest_deaths"]
+        assert len(fewest) == 3
+        # Must be in ascending death_count order
+        death_counts = [e["death_count"] for e in fewest]
+        assert death_counts == sorted(death_counts), f"Expected ascending order, got {death_counts}"
+
+    def test_fewest_decisions_ordering_with_multiple_completers(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """fewest_decisions must rank the completer with fewest DecisionLog rows first."""
+        from app.models.player import DecisionLog, User
+
+        tokens = register_and_login(client, username="lb_order_dec_user", password="pass1234!")
+        user = db.query(User).filter(User.username == "lb_order_dec_user").first()
+
+        book = make_book(db)
+        victory_scene = make_scene(db, book, number=350, is_victory=True)
+        scene_a = make_scene(db, book, number=10)
+
+        char_few = make_character(db, user, book, current_scene_id=victory_scene.id)
+        char_many = make_character(db, user, book, current_scene_id=victory_scene.id)
+
+        # char_few gets 1 decision, char_many gets 5
+        for _ in range(1):
+            db.add(DecisionLog(
+                character_id=char_few.id,
+                run_number=1,
+                from_scene_id=scene_a.id,
+                to_scene_id=victory_scene.id,
+                action_type="choice",
+                created_at=datetime.now(tz=UTC),
+            ))
+        for _ in range(5):
+            db.add(DecisionLog(
+                character_id=char_many.id,
+                run_number=1,
+                from_scene_id=scene_a.id,
+                to_scene_id=victory_scene.id,
+                action_type="choice",
+                created_at=datetime.now(tz=UTC),
+            ))
+        db.flush()
+
+        response = client.get(
+            f"/leaderboards/books/{book.id}",
+            headers=auth_headers(tokens["access_token"]),
+        )
+        assert response.status_code == 200
+        fewest_dec = response.json()["fewest_decisions"]
+        assert len(fewest_dec) == 2
+        # First entry should have fewer decisions
+        assert fewest_dec[0]["decisions"] < fewest_dec[1]["decisions"]
+        assert fewest_dec[0]["decisions"] == 1
+        assert fewest_dec[1]["decisions"] == 5
+
+    def test_highest_endurance_shows_real_username(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """highest_endurance_at_victory must show the actual username, not 'user_N'."""
+        from app.models.player import User
+
+        tokens = register_and_login(client, username="lb_realname_user", password="pass1234!")
+        user = db.query(User).filter(User.username == "lb_realname_user").first()
+
+        book = make_book(db)
+        victory_scene = make_scene(db, book, number=350, is_victory=True)
+        make_character(db, user, book, current_scene_id=victory_scene.id, endurance_current=20)
+        db.flush()
+
+        response = client.get(
+            f"/leaderboards/books/{book.id}",
+            headers=auth_headers(tokens["access_token"]),
+        )
+        assert response.status_code == 200
+        highest = response.json()["highest_endurance_at_victory"]
+        assert len(highest) >= 1
+        entry = highest[0]
+        # Username must not be the old placeholder pattern "user_<id>"
+        assert entry["username"] == "lb_realname_user", (
+            f"Expected real username 'lb_realname_user', got '{entry['username']}'"
+        )
+
+    def test_highest_endurance_ordering_with_multiple_completers(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """highest_endurance_at_victory must rank the highest endurance first."""
+        from app.models.player import User
+
+        tokens = register_and_login(client, username="lb_end_order_user", password="pass1234!")
+        user = db.query(User).filter(User.username == "lb_end_order_user").first()
+
+        book = make_book(db)
+        victory_scene = make_scene(db, book, number=350, is_victory=True)
+
+        make_character(db, user, book, current_scene_id=victory_scene.id, endurance_current=10)
+        make_character(db, user, book, current_scene_id=victory_scene.id, endurance_current=30)
+        make_character(db, user, book, current_scene_id=victory_scene.id, endurance_current=20)
+        db.flush()
+
+        response = client.get(
+            f"/leaderboards/books/{book.id}",
+            headers=auth_headers(tokens["access_token"]),
+        )
+        assert response.status_code == 200
+        highest = response.json()["highest_endurance_at_victory"]
+        assert len(highest) == 3
+        endurance_values = [e["endurance"] for e in highest]
+        assert endurance_values == sorted(endurance_values, reverse=True), (
+            f"Expected descending order, got {endurance_values}"
+        )
+
+
+class TestOverallLeaderboard:
     """Extended tests for GET /leaderboards/overall."""
 
     def test_overall_counts_all_non_deleted_characters(

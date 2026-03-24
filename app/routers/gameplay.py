@@ -1,17 +1,13 @@
 """Gameplay router — scene navigation, lifecycle endpoints, and book advance wizard initiation."""
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import VersionConflictError, get_owned_character, verify_version
-from app.events import log_character_event
-from app.models.content import Choice, Scene
-from app.models.player import Character, DecisionLog
+from app.dependencies import get_owned_character, verify_version
+from app.models.player import Character
 from app.schemas.characters import AdvanceInitResponse, AdvanceWizardBookInfo
 from app.schemas.gameplay import (
     ChoiceRandomResponse,
@@ -23,7 +19,6 @@ from app.schemas.gameplay import (
     InventoryResponse,
     ItemActionRequest,
     ItemActionResponse,
-    OutcomeBand,
     ReplayRequest,
     RestartRequest,
     RollPhaseEffectResponse,
@@ -34,15 +29,14 @@ from app.schemas.gameplay import (
     UseItemResponse,
 )
 from app.services.combat_service import resolve_evasion, resolve_round
-from app.services.gameplay_service import (
-    _build_character_state,
-    get_scene_state,
+from app.services.item_service import (
     process_inventory_action,
     process_item_action,
-    process_roll,
     process_use_item,
-    transition_to_scene,
 )
+from app.services.roll_service import process_roll
+from app.services.scene_service import get_scene_state
+from app.services.transition_service import process_choose, transition_to_scene
 from app.services.lifecycle_service import replay, restart
 from app.services.wizard_service import init_book_advance_wizard
 
@@ -116,185 +110,37 @@ def choose(
         HTTPException 400: CHOICE_UNAVAILABLE, INVALID_CHOICE.
         HTTPException 404: If the choice or target scene is not found.
     """
-    import json as _json
+    verify_version(character, body.version)
 
-    from app.engine.conditions import filter_choices as _filter_choices
-    from app.engine.meters import apply_gold_delta
-    from app.engine.types import ChoiceData
-    from app.models.player import CharacterEvent as _CE
-
-    # --- Version check ---
     try:
-        verify_version(character, body.version)
-    except VersionConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error_code": "VERSION_MISMATCH",
-                "current_version": exc.current_version,
-            },
-        )
+        result = process_choose(db=db, character=character, choice_id=body.choice_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        msg = str(exc)
+        for error_code in ("WRONG_PHASE", "PENDING_ITEMS", "COMBAT_UNRESOLVED"):
+            if msg.startswith(error_code):
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": msg, "error_code": error_code},
+                )
+        for error_code in ("CHOICE_UNAVAILABLE", "PATH_UNAVAILABLE", "INVALID_CHOICE"):
+            if msg.startswith(error_code):
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": msg, "error_code": error_code},
+                )
+        raise HTTPException(status_code=400, detail=msg) from exc
 
-    # --- Phase check: must be in choices phase ---
-    if character.scene_phase != "choices":
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": f"Character is in '{character.scene_phase}' phase, not 'choices'.",
-                "error_code": "WRONG_PHASE",
-            },
-        )
-
-    # --- Load current scene ---
-    if character.current_scene_id is None:
-        raise HTTPException(status_code=404, detail="Character has no current scene")
-
-    scene = db.query(Scene).filter(Scene.id == character.current_scene_id).first()
-    if scene is None:
-        raise HTTPException(status_code=404, detail="Current scene not found")
-
-    # --- Pending items check ---
-    resolved_item_events = (
-        db.query(_CE)
-        .filter(
-            _CE.character_id == character.id,
-            _CE.scene_id == scene.id,
-            _CE.run_number == character.current_run,
-            _CE.event_type.in_(["item_pickup", "item_decline"]),
-        )
-        .all()
-    )
-    resolved_item_ids: set[int] = set()
-    for ev in resolved_item_events:
-        try:
-            d = _json.loads(ev.details) if ev.details else {}
-            if "scene_item_id" in d:
-                resolved_item_ids.add(int(d["scene_item_id"]))
-        except (ValueError, TypeError):
-            pass
-
-    pending_count = sum(
-        1
-        for si in scene.scene_items
-        if si.action == "gain"
-        and si.item_type not in ("gold", "meal")
-        and si.id not in resolved_item_ids
-    )
-    if pending_count > 0:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": f"There are {pending_count} unresolved scene items.",
-                "error_code": "PENDING_ITEMS",
-            },
-        )
-
-    # --- Unresolved combat check ---
-    if character.active_combat_encounter_id is not None:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": "There is an unresolved combat encounter.",
-                "error_code": "COMBAT_UNRESOLVED",
-            },
-        )
-
-    # --- Load choice and verify it belongs to the current scene ---
-    choice = db.query(Choice).filter(Choice.id == body.choice_id).first()
-    if choice is None or choice.scene_id != character.current_scene_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Choice not found in current scene.",
-        )
-
-    # --- Availability check ---
-    char_state = _build_character_state(db, character)
-    choice_data = ChoiceData(
-        choice_id=choice.id,
-        target_scene_id=choice.target_scene_id,
-        target_scene_number=choice.target_scene_number,
-        display_text=choice.display_text,
-        condition_type=choice.condition_type,
-        condition_value=choice.condition_value,
-        has_random_outcomes=bool(choice.random_outcomes),
-    )
-    filtered = _filter_choices([choice_data], char_state)
-    if filtered and not filtered[0].available:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "detail": f"Choice is not available: {filtered[0].reason}",
-                "error_code": "CHOICE_UNAVAILABLE",
-            },
-        )
-
-    # --- Gold-gated choice: deduct gold before transitioning ---
-    from_scene_id = character.current_scene_id
-    if choice.condition_type == "gold" and choice.condition_value is not None:
-        gold_cost = int(choice.condition_value)
-        new_gold, actual_delta = apply_gold_delta(char_state, -gold_cost)
-        character.gold = new_gold
-        char_state.gold = new_gold
-        log_character_event(
-            db,
-            character,
-            "gold_change",
-            scene_id=character.current_scene_id,
-            phase="choices",
-            details={
-                "reason": "gold_gated_choice",
-                "choice_id": choice.id,
-                "amount_deducted": abs(actual_delta),
-                "new_total": new_gold,
-            },
-        )
-
-    # --- Choice-triggered random: set pending and return requires_roll ---
-    if choice.random_outcomes:
-        character.pending_choice_id = choice.id
-        character.version += 1
-        db.flush()
-
-        outcome_bands = [
-            OutcomeBand(
-                range_min=ro.range_min,
-                range_max=ro.range_max,
-                target_scene_number=ro.target_scene_number,
-                narrative_text=ro.narrative_text,
-            )
-            for ro in sorted(choice.random_outcomes, key=lambda r: r.range_min)
-        ]
+    if result["type"] == "requires_roll":
         return ChoiceRandomResponse(
             requires_roll=True,
-            choice_id=choice.id,
-            choice_text=choice.display_text,
-            outcome_bands=outcome_bands,
-            version=character.version,
+            choice_id=result["choice_id"],
+            choice_text=result["choice_text"],
+            outcome_bands=result["outcome_bands"],
+            version=result["version"],
         )
-
-    # --- Normal choice: log decision and transition ---
-    if choice.target_scene_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Choice has no target scene and no random outcomes.",
-        )
-
-    # Log decision log entry before transition.
-    decision = DecisionLog(
-        character_id=character.id,
-        run_number=character.current_run,
-        from_scene_id=from_scene_id,
-        to_scene_id=choice.target_scene_id,
-        choice_id=choice.id,
-        action_type="choice",
-        details=None,
-        created_at=datetime.now(UTC),
-    )
-    db.add(decision)
-
-    # Transition to target scene (runs automatic phases, increments version).
-    return transition_to_scene(db=db, character=character, target_scene_id=choice.target_scene_id)
+    return result["scene_response"]
 
 
 @router.post("/{character_id}/advance", status_code=201, response_model=AdvanceInitResponse)
@@ -335,7 +181,7 @@ def advance_to_next_book(
                 content={"detail": msg, "error_code": "WIZARD_ACTIVE"},
             )
         return JSONResponse(
-            status_code=400,
+            status_code=409,
             content={"detail": msg, "error_code": "ADVANCE_NOT_ALLOWED"},
         )
     except LookupError as exc:
@@ -473,17 +319,7 @@ def combat_round(
         HTTPException 400: If the character is dead or has no active encounter.
     """
     # Version check
-    try:
-        verify_version(character, body.version)
-    except VersionConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error_code": "VERSION_MISMATCH",
-                "current_version": exc.current_version,
-            },
-        )
+    verify_version(character, body.version)
 
     # Phase check
     if character.scene_phase != "combat":
@@ -535,17 +371,7 @@ def combat_evade(
             or character is dead.
     """
     # Version check
-    try:
-        verify_version(character, body.version)
-    except VersionConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error_code": "VERSION_MISMATCH",
-                "current_version": exc.current_version,
-            },
-        )
+    verify_version(character, body.version)
 
     # Phase check
     if character.scene_phase != "combat":
@@ -783,17 +609,7 @@ def roll(
     import random as _random
 
     # Version check
-    try:
-        verify_version(character, body.version)
-    except VersionConflictError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(exc),
-                "error_code": "VERSION_MISMATCH",
-                "current_version": exc.current_version,
-            },
-        )
+    verify_version(character, body.version)
 
     # Server-generated random number
     random_number = _random.randint(0, 9)

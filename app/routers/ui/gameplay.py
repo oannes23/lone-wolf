@@ -19,14 +19,14 @@ from app.models.player import Character, User
 from app.schemas.reports import VALID_TAGS
 from app.limiter import limiter
 from app.services.combat_service import resolve_evasion, resolve_round
-from app.services.gameplay_service import (
-    get_scene_state,
+from app.services.item_service import (
     process_inventory_action,
     process_item_action,
-    process_roll,
     process_use_item,
-    transition_to_scene,
 )
+from app.services.roll_service import process_roll
+from app.services.scene_service import get_scene_state
+from app.services.transition_service import process_choose, transition_to_scene
 from app.services.lifecycle_service import replay, restart
 from app.services.wizard_service import init_book_advance_wizard
 from app.ui_dependencies import get_current_ui_user, templates
@@ -142,137 +142,14 @@ def choose_submit(
     if not character or character.is_deleted or character.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Character not found")
 
-    from app.models.content import Choice, Scene
-    from app.models.player import DecisionLog, CharacterEvent as _CE
-    from app.dependencies import VersionConflictError
-    from app.engine.conditions import filter_choices as _filter_choices
-    from app.engine.types import ChoiceData
-    from app.events import log_character_event
-    from app.services.gameplay_service import _build_character_state
-    from datetime import UTC
-
     # Version check — on mismatch, redirect back (scene will be current)
     if version != character.version:
-        return RedirectResponse(
-            url=f"/ui/game/{character_id}",
-            status_code=303,
-        )
-
-    # Phase check
-    if character.scene_phase != "choices":
-        return RedirectResponse(
-            url=f"/ui/game/{character_id}",
-            status_code=303,
-        )
-
-    if character.current_scene_id is None:
-        raise HTTPException(status_code=404, detail="Character has no current scene")
-
-    scene = db.query(Scene).filter(Scene.id == character.current_scene_id).first()
-    if scene is None:
-        raise HTTPException(status_code=404, detail="Current scene not found")
-
-    # Check for pending items
-    resolved_item_events = (
-        db.query(_CE)
-        .filter(
-            _CE.character_id == character.id,
-            _CE.scene_id == scene.id,
-            _CE.run_number == character.current_run,
-            _CE.event_type.in_(["item_pickup", "item_decline"]),
-        )
-        .all()
-    )
-    resolved_item_ids: set[int] = set()
-    for ev in resolved_item_events:
-        try:
-            d = json.loads(ev.details) if ev.details else {}
-            if "scene_item_id" in d:
-                resolved_item_ids.add(int(d["scene_item_id"]))
-        except (ValueError, TypeError):
-            pass
-
-    pending_count = sum(
-        1
-        for si in scene.scene_items
-        if si.action == "gain"
-        and si.item_type not in ("gold", "meal")
-        and si.id not in resolved_item_ids
-    )
-    if pending_count > 0:
         return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
 
-    # Unresolved combat check
-    if character.active_combat_encounter_id is not None:
-        return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
-
-    # Load and validate choice
-    choice = db.query(Choice).filter(Choice.id == choice_id).first()
-    if choice is None or choice.scene_id != character.current_scene_id:
-        return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
-
-    # Availability check
-    char_state = _build_character_state(db, character)
-    choice_data = ChoiceData(
-        choice_id=choice.id,
-        target_scene_id=choice.target_scene_id,
-        target_scene_number=choice.target_scene_number,
-        display_text=choice.display_text,
-        condition_type=choice.condition_type,
-        condition_value=choice.condition_value,
-        has_random_outcomes=bool(choice.random_outcomes),
-    )
-    filtered = _filter_choices([choice_data], char_state)
-    if filtered and not filtered[0].available:
-        return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
-
-    # Gold-gated choice: deduct gold before transitioning
-    from_scene_id = character.current_scene_id
-    if choice.condition_type == "gold" and choice.condition_value is not None:
-        from app.engine.meters import apply_gold_delta
-
-        gold_cost = int(choice.condition_value)
-        new_gold, actual_delta = apply_gold_delta(char_state, -gold_cost)
-        character.gold = new_gold
-        char_state.gold = new_gold
-        log_character_event(
-            db,
-            character,
-            "gold_change",
-            scene_id=character.current_scene_id,
-            phase="choices",
-            details={
-                "reason": "gold_gated_choice",
-                "choice_id": choice.id,
-                "amount_deducted": abs(actual_delta),
-                "new_total": new_gold,
-            },
-        )
-
-    # Choice-triggered random: set pending and redirect (scene page will show roll UI)
-    if choice.random_outcomes:
-        character.pending_choice_id = choice.id
-        character.version += 1
-        db.flush()
-        return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
-
-    # Normal choice: log decision and transition
-    if choice.target_scene_id is None:
-        return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
-
-    decision = DecisionLog(
-        character_id=character.id,
-        run_number=character.current_run,
-        from_scene_id=from_scene_id,
-        to_scene_id=choice.target_scene_id,
-        choice_id=choice.id,
-        action_type="choice",
-        details=None,
-        created_at=datetime.now(UTC),
-    )
-    db.add(decision)
-
-    transition_to_scene(db=db, character=character, target_scene_id=choice.target_scene_id)
+    try:
+        process_choose(db=db, character=character, choice_id=choice_id)
+    except (ValueError, LookupError):
+        pass  # On any error redirect back — scene will show current state
 
     return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
 

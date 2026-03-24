@@ -689,6 +689,70 @@ def test_endurance_max_recalculated_on_use_item(client: TestClient, db: Session)
 
 
 # ---------------------------------------------------------------------------
+# Scene response pending_items list (regression: Story 10.9)
+# ---------------------------------------------------------------------------
+
+
+def test_accept_item_removed_from_scene_pending_items(client: TestClient, db: Session) -> None:
+    """After accepting a scene item, GET /scene no longer lists it as pending.
+
+    Regression for the bug where _get_pending_items checked for scene_item_id
+    in event details, but process_item_action never included it.
+    """
+    headers, char_id, scene = _setup_base(db, client)
+    si = _seed_scene_item(db, scene.id, item_name="Spear", item_type="weapon")
+
+    # Accept the item
+    resp = client.post(
+        f"/gameplay/{char_id}/item",
+        json={"scene_item_id": si.id, "action": "accept", "version": 1},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Fetch the scene state
+    scene_resp = client.get(f"/gameplay/{char_id}/scene", headers=headers)
+    assert scene_resp.status_code == 200, scene_resp.text
+    data = scene_resp.json()
+
+    pending_ids = [item["id"] for item in data.get("pending_items", [])]
+    assert si.id not in pending_ids, (
+        f"scene_item {si.id} should not appear in pending_items after accept, "
+        f"but got: {data.get('pending_items')}"
+    )
+
+
+def test_decline_item_removed_from_scene_pending_items(client: TestClient, db: Session) -> None:
+    """After declining a scene item, GET /scene no longer lists it as pending.
+
+    Regression for the bug where _get_pending_items checked for scene_item_id
+    in event details, but process_item_action never included it.
+    """
+    headers, char_id, scene = _setup_base(db, client)
+    si = _seed_scene_item(db, scene.id, item_name="Club", item_type="weapon", is_mandatory=False)
+
+    # Decline the item
+    resp = client.post(
+        f"/gameplay/{char_id}/item",
+        json={"scene_item_id": si.id, "action": "decline", "version": 1},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Character is now in 'choices' phase after resolving all items, so
+    # pending_items will be empty (phase guard). Re-check via scene response.
+    scene_resp = client.get(f"/gameplay/{char_id}/scene", headers=headers)
+    assert scene_resp.status_code == 200, scene_resp.text
+    data = scene_resp.json()
+
+    pending_ids = [item["id"] for item in data.get("pending_items", [])]
+    assert si.id not in pending_ids, (
+        f"scene_item {si.id} should not appear in pending_items after decline, "
+        f"but got: {data.get('pending_items')}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Version mismatch
 # ---------------------------------------------------------------------------
 

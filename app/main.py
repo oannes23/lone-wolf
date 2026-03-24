@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=409,
             content={
-                "detail": "Version mismatch — character state has changed",
+                "detail": str(exc),
                 "error_code": "VERSION_MISMATCH",
                 "current_version": exc.current_version,
             },

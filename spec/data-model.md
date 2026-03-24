@@ -26,7 +26,7 @@ Gameplay-specific data for each numbered passage. Each scene also has a correspo
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | `Integer` PK | Auto-increment |
-| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT | 1:1 link to the game_objects taxonomy entry for this scene |
+| `game_object_id` | `Integer` FK → `game_objects.id` ON DELETE RESTRICT NULLABLE | 1:1 link to the game_objects taxonomy entry for this scene. Null until the parser populates it. |
 | `book_id` | `Integer` FK → `books.id` ON DELETE RESTRICT | |
 | `number` | `Integer` | Scene number within book |
 | `html_id` | `String(20)` | Anchor name from source, e.g. `sect1` |
@@ -411,6 +411,7 @@ Full round-by-round combat history. Current combat state derived from latest rou
 | `id` | `Integer` PK | |
 | `character_id` | `Integer` FK → `characters.id` ON DELETE RESTRICT | |
 | `combat_encounter_id` | `Integer` FK → `combat_encounters.id` ON DELETE RESTRICT | |
+| `run_number` | `Integer` | Character's run number at time of combat |
 | `round_number` | `Integer` | 1-indexed |
 | `random_number` | `Integer` | Server-generated, 0–9 |
 | `combat_ratio` | `Integer` | Computed CR for this round |
@@ -421,7 +422,7 @@ Full round-by-round combat history. Current combat state derived from latest rou
 | `psi_surge_used` | `Boolean` | Whether Psi-surge was active this round |
 | `created_at` | `DateTime` | |
 
-**Unique constraint**: `(character_id, combat_encounter_id, round_number)`
+**Unique constraint**: `(character_id, combat_encounter_id, run_number, round_number)`
 
 ### `character_events`
 
@@ -605,7 +606,7 @@ users 1──∞ reports
 - `characters(user_id)` — list user's characters
 - `characters(user_id, is_deleted)` — list user's active characters
 - `decision_log(character_id, run_number, created_at)` — character history per run
-- `combat_rounds(character_id, combat_encounter_id, round_number)` — combat state lookup
+- `combat_rounds(character_id, combat_encounter_id, run_number, round_number)` — combat state lookup (covered by unique constraint)
 - `character_events(character_id, scene_id, created_at)` — events per scene visit
 - `character_events(character_id, event_type)` — filter by event type
 - `character_events(character_id, seq)` — ordered event replay

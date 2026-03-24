@@ -69,7 +69,7 @@ def get_book_leaderboard(db: Session, book_id: int, limit: int = 10) -> BookLead
     fewest_decisions = _build_fewest_decisions(db, completed_chars, limit)
 
     # Highest endurance at victory (among completers)
-    highest_endurance = _build_highest_endurance(completed_chars, limit)
+    highest_endurance = _build_highest_endurance(db, completed_chars, limit)
 
     # Most common death scenes for this book
     most_common_deaths = _build_death_scenes(db, book_id, limit)
@@ -126,7 +126,7 @@ def get_overall_leaderboard(db: Session, limit: int = 10) -> OverallLeaderboard:
     total_completions = len(completed_chars)
 
     # Highest endurance at victory across all books
-    highest_endurance = _build_highest_endurance(completed_chars, limit)
+    highest_endurance = _build_highest_endurance(db, completed_chars, limit)
 
     # Most completions (characters with most runs completed — i.e. by current_run proxy)
     # Using fewest_deaths among completers as a proxy for "most completions" leaders
@@ -153,29 +153,72 @@ def _get_username(db: Session, character: Character) -> str:
     return user.username if user else "unknown"
 
 
-def _build_fewest_deaths(
-    db: Session, completed_chars: list[Character], limit: int
+def _build_decision_counts(db: Session, char_ids: list[int]) -> dict[int, int]:
+    """Return a mapping of character_id -> decision count using a single GROUP BY query.
+
+    Args:
+        db: Active database session.
+        char_ids: List of character IDs to aggregate.
+
+    Returns:
+        A dict mapping each character_id to its decision count (0 if absent).
+    """
+    if not char_ids:
+        return {}
+
+    rows = (
+        db.query(DecisionLog.character_id, func.count(DecisionLog.id))
+        .filter(DecisionLog.character_id.in_(char_ids))
+        .group_by(DecisionLog.character_id)
+        .all()
+    )
+    return {character_id: count for character_id, count in rows}
+
+
+def _build_leaderboard_entries(
+    db: Session,
+    completed_chars: list[Character],
+    limit: int,
+    *,
+    sort_key: str,
 ) -> list[LeaderboardEntry]:
-    """Build fewest-deaths leaderboard from a list of completing characters."""
+    """Build a :class:`LeaderboardEntry` list sorted by either deaths or decisions.
+
+    Uses a single SQL GROUP BY query to count decisions for all characters at once
+    (avoids the N+1 pattern of issuing one COUNT per character).
+
+    Args:
+        db: Active database session.
+        completed_chars: Characters that have completed the book.
+        limit: Maximum number of entries to return.
+        sort_key: Either ``"deaths"`` (sort by death_count first) or
+            ``"decisions"`` (sort by decision count first).
+
+    Returns:
+        A sorted list of :class:`LeaderboardEntry` objects.
+    """
+    from app.models.player import User
+
     if not completed_chars:
         return []
 
-    from app.models.player import User
+    char_ids = [c.id for c in completed_chars]
+    decision_counts = _build_decision_counts(db, char_ids)
 
-    # Count decisions per character
-    decision_counts: dict[int, int] = {}
-    for char in completed_chars:
-        count = db.query(func.count(DecisionLog.id)).filter(
-            DecisionLog.character_id == char.id
-        ).scalar() or 0
-        decision_counts[char.id] = count
-
-    # Load user ids
     user_ids = {char.user_id for char in completed_chars}
     users = db.query(User).filter(User.id.in_(user_ids)).all()
     user_map = {u.id: u.username for u in users}
 
-    sorted_chars = sorted(completed_chars, key=lambda c: (c.death_count, decision_counts.get(c.id, 0)))
+    if sort_key == "deaths":
+        sorted_chars = sorted(
+            completed_chars,
+            key=lambda c: (c.death_count, decision_counts.get(c.id, 0)),
+        )
+    else:  # "decisions"
+        sorted_chars = sorted(
+            completed_chars,
+            key=lambda c: (decision_counts.get(c.id, 0), c.death_count),
+        )
 
     return [
         LeaderboardEntry(
@@ -185,58 +228,55 @@ def _build_fewest_deaths(
         )
         for char in sorted_chars[:limit]
     ]
+
+
+def _build_fewest_deaths(
+    db: Session, completed_chars: list[Character], limit: int
+) -> list[LeaderboardEntry]:
+    """Build fewest-deaths leaderboard from a list of completing characters.
+
+    Uses a single SQL GROUP BY query to count decisions (no N+1 per character).
+    """
+    return _build_leaderboard_entries(db, completed_chars, limit, sort_key="deaths")
 
 
 def _build_fewest_decisions(
     db: Session, completed_chars: list[Character], limit: int
 ) -> list[LeaderboardEntry]:
-    """Build fewest-decisions leaderboard from a list of completing characters."""
+    """Build fewest-decisions leaderboard from a list of completing characters.
+
+    Uses a single SQL GROUP BY query to count decisions (no N+1 per character).
+    """
+    return _build_leaderboard_entries(db, completed_chars, limit, sort_key="decisions")
+
+
+def _build_highest_endurance(
+    db: Session, completed_chars: list[Character], limit: int
+) -> list[EnduranceEntry]:
+    """Build highest-endurance-at-victory leaderboard.
+
+    Uses the character's current endurance (they are currently at a victory scene).
+    Batch-loads usernames to avoid per-row queries.
+
+    Args:
+        db: Active database session.
+        completed_chars: Characters currently at a victory scene.
+        limit: Maximum number of entries to return.
+    """
     if not completed_chars:
         return []
 
     from app.models.player import User
 
-    # Count decisions per character
-    decision_counts: dict[int, int] = {}
-    for char in completed_chars:
-        count = db.query(func.count(DecisionLog.id)).filter(
-            DecisionLog.character_id == char.id
-        ).scalar() or 0
-        decision_counts[char.id] = count
-
     user_ids = {char.user_id for char in completed_chars}
     users = db.query(User).filter(User.id.in_(user_ids)).all()
     user_map = {u.id: u.username for u in users}
 
-    sorted_chars = sorted(completed_chars, key=lambda c: (decision_counts.get(c.id, 0), c.death_count))
-
-    return [
-        LeaderboardEntry(
-            username=user_map.get(char.user_id, "unknown"),
-            death_count=char.death_count,
-            decisions=decision_counts.get(char.id, 0),
-        )
-        for char in sorted_chars[:limit]
-    ]
-
-
-def _build_highest_endurance(
-    completed_chars: list[Character], limit: int
-) -> list[EnduranceEntry]:
-    """Build highest-endurance-at-victory leaderboard.
-
-    Uses the character's current endurance (they are currently at a victory scene).
-    """
-    if not completed_chars:
-        return []
-
-    # Note: since completed_chars are at victory scenes, endurance_current reflects victory endurance
-    # We don't have the username without a db query, but we simplify here
     sorted_chars = sorted(completed_chars, key=lambda c: -c.endurance_current)
 
     return [
         EnduranceEntry(
-            username=f"user_{char.user_id}",
+            username=user_map.get(char.user_id, "unknown"),
             endurance=char.endurance_current,
             death_count=char.death_count,
         )
@@ -362,7 +402,12 @@ def _build_item_usage(
     if not scene_ids_for_book:
         return []
 
-    # Query raw item_pickup events for this book's scenes
+    # Query raw item_pickup events for this book's scenes.
+    # NOTE (SQLite limitation): SQLite has no native JSON aggregation functions
+    # (e.g. json_extract in GROUP BY is not portable across versions), so we
+    # load all matching event rows and group by item_name in Python.  A future
+    # migration to PostgreSQL would allow server-side aggregation using
+    # jsonb_extract_path / jsonb_build_object, eliminating this Python loop.
     rows = (
         db.query(CharacterEvent)
         .filter(

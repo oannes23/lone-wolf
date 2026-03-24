@@ -262,22 +262,28 @@ Full character sheet.
 {
   "id": 1,
   "name": "Silent Wolf",
-  "book": { "id": 1, "title": "Flight from the Dark" },
+  "book_title": "Flight from the Dark",
   "combat_skill_base": 14,
   "endurance_base": 26,
   "endurance_max": 26,
   "endurance_current": 22,
   "gold": 15,
   "meals": 2,
+  "is_alive": true,
   "death_count": 0,
   "current_run": 1,
   "version": 5,
-  "disciplines": ["Camouflage", "Sixth Sense", "Healing", "Mindblast", "Mind Over Matter"],
-  "weapons": [{ "name": "Axe", "is_equipped": true }],
-  "backpack_items": ["Healing Potion"],
-  "special_items": ["Map"],
-  "is_alive": true,
-  "current_scene": { "number": 141, "book_id": 1 },
+  "scene_phase": "choices",
+  "current_scene_number": 141,
+  "items": [
+    { "character_item_id": 3, "item_name": "Axe", "item_type": "weapon", "is_equipped": true },
+    { "character_item_id": 4, "item_name": "Healing Potion", "item_type": "backpack", "is_equipped": false },
+    { "character_item_id": 5, "item_name": "Map", "item_type": "special", "is_equipped": false }
+  ],
+  "disciplines": [
+    { "name": "Camouflage", "weapon_category": null },
+    { "name": "Weaponskill", "weapon_category": "Sword" }
+  ],
   "active_wizard": null
 }
 ```
@@ -290,11 +296,11 @@ Decision log in chronological order. Filterable by run.
 // Response 200
 [
   {
-    "run_number": 1,
-    "from_scene": 1,
-    "to_scene": 141,
-    "action_type": "choice",
+    "scene_number": 1,
     "choice_text": "Use your Sixth Sense to investigate",
+    "target_scene_number": 141,
+    "action_type": "choice",
+    "run_number": 1,
     "created_at": "2025-01-15T10:30:00Z"
   }
 ]
@@ -311,14 +317,11 @@ Player-accessible event log. Returns `character_events` in `seq` order with filt
 [
   {
     "id": 42,
-    "seq": 15,
     "event_type": "meal_penalty",
-    "phase": "eat",
-    "scene_number": 100,
+    "details": "{ \"endurance_change\": -3 }",
+    "scene_id": 100,
     "run_number": 1,
-    "details": { "endurance_change": -3 },
-    "operations": [{"op": "meter.delta", "field": "endurance_current", "delta": -3}],
-    "parent_event_id": null,
+    "seq": 15,
     "created_at": "2025-01-15T10:35:00Z"
   }
 ]
@@ -432,9 +435,11 @@ Get the current scene with available actions.
     "enemy_end_remaining": 24,
     "hero_end_remaining": 22,
     "rounds_fought": 0,
+    "evasion_available": true,
     "can_evade": false,
-    "evasion_possible": true,
-    "evasion_after_rounds": 3
+    "evasion_after_rounds": 3,
+    "hero_effective_cs": 18,
+    "combat_ratio": 2
   },
   "pending_items": [],
   "is_death": false,
@@ -513,22 +518,23 @@ Resolve one round of combat. Random number is server-generated.
 
 // Response 200
 {
-  "round": 3,
-  "enemy_name": "Kraan",
+  "round_number": 3,
   "combat_ratio": -2,
   "random_number": 5,
-  "enemy_loss": 6,
-  "hero_loss": 3,
-  "enemy_endurance_remaining": 12,
-  "hero_endurance_remaining": 19,
+  "enemy_damage": 6,
+  "hero_damage": 3,
+  "enemy_end_remaining": 12,
+  "hero_end_remaining": 19,
+  "psi_surge_used": false,
   "combat_over": false,
+  "result": "continue",
+  "evasion_available": true,
   "can_evade": false,
-  "psi_surge_active": false,
   "version": 6
 }
 ```
 
-When `combat_over` is `true`, includes `result`: `"win"` or `"loss"`.
+When `combat_over` is `true`, `result` is `"win"` or `"loss"`. When ongoing, `result` is `"continue"`.
 
 ### `POST /gameplay/{character_id}/combat/evade`
 
@@ -570,17 +576,30 @@ Resolve a pending scene item (accept or decline). During the `items` phase, the 
 
 // Response 200
 {
-  "item_name": "Sword",
   "action": "accept",
+  "item_name": "Sword",
+  "item_type": "weapon",
+  "character_item_id": 42,
   "pending_items_remaining": 1,
   "phase_complete": false,
-  "inventory": {
-    "weapons": [{ "name": "Axe", "is_equipped": true }, { "name": "Sword", "is_equipped": false }],
-    "backpack_items": [],
-    "special_items": ["Map"],
-    "gold": 15,
-    "meals": 2
-  },
+  "inventory": [
+    { "character_item_id": 41, "item_name": "Axe", "item_type": "weapon", "is_equipped": true, "game_object_id": 7 },
+    { "character_item_id": 42, "item_name": "Sword", "item_type": "weapon", "is_equipped": false, "game_object_id": 12 }
+  ],
+  "version": 6
+}
+
+// Response 200 — decline
+{
+  "action": "decline",
+  "item_name": null,
+  "item_type": null,
+  "character_item_id": null,
+  "pending_items_remaining": 0,
+  "phase_complete": true,
+  "inventory": [
+    { "character_item_id": 41, "item_name": "Axe", "item_type": "weapon", "is_equipped": true, "game_object_id": 7 }
+  ],
   "version": 6
 }
 ```
@@ -595,15 +614,14 @@ Manage inventory (drop, equip, unequip). Available at any time, **including duri
 
 ```json
 // Request
-{ "action": "drop", "item_name": "Axe", "version": 5 }
+{ "action": "drop", "character_item_id": 7, "version": 5 }
 
 // Response 200
 {
-  "weapons": [{ "name": "Sword", "is_equipped": false }],
-  "backpack_items": [],
-  "special_items": ["Map"],
-  "gold": 15,
-  "meals": 2,
+  "action": "drop",
+  "inventory": [
+    { "character_item_id": 8, "item_name": "Sword", "item_type": "weapon", "is_equipped": false, "game_object_id": 12 }
+  ],
   "version": 6
 }
 ```
@@ -616,15 +634,16 @@ Use a consumable item (Healing Potion, Laumspur, etc.). Available at any phase. 
 
 ```json
 // Request
-{ "item_name": "Healing Potion", "version": 5 }
+{ "character_item_id": 9, "version": 5 }
 
 // Response 200
 {
-  "item_name": "Healing Potion",
-  "effect": "endurance_restore",
-  "amount": 4,
+  "effect_applied": { "effect": "endurance_restore", "amount": 4 },
   "endurance_current": 22,
-  "item_consumed": true,
+  "endurance_max": 26,
+  "inventory": [
+    { "character_item_id": 8, "item_name": "Sword", "item_type": "weapon", "is_equipped": true, "game_object_id": 12 }
+  ],
   "version": 6
 }
 ```
@@ -727,21 +746,25 @@ Restart a dead character from the beginning of the current book.
 // Request
 { "version": 5 }
 
-// Response 200
+// Response 200 — full SceneResponse shape (same as GET /gameplay/{id}/scene)
 {
-  "message": "Character restored to book start",
-  "death_count": 1,
-  "current_run": 2,
   "scene_number": 1,
-  "combat_skill_base": 14,
-  "endurance_base": 26,
-  "endurance_max": 26,
-  "endurance_current": 26,
+  "narrative": "...",
+  "phase": "choices",
+  "phase_index": 0,
+  "phase_sequence": ["choices"],
+  "phase_results": [],
+  "choices": [...],
+  "combat": null,
+  "pending_items": [],
+  "is_death": false,
+  "is_victory": false,
+  "is_alive": true,
   "version": 6
 }
 ```
 
-Returns `400` if the character is alive.
+Returns `400` if the character is alive (`CHARACTER_ALIVE`).
 
 ### `POST /gameplay/{character_id}/replay`
 
@@ -751,15 +774,20 @@ Replay the current book from the beginning (available at victory scenes instead 
 // Request
 { "version": 5 }
 
-// Response 200
+// Response 200 — full SceneResponse shape (same as GET /gameplay/{id}/scene)
 {
-  "message": "Replaying from book start",
-  "current_run": 3,
   "scene_number": 1,
-  "combat_skill_base": 14,
-  "endurance_base": 26,
-  "endurance_max": 26,
-  "endurance_current": 26,
+  "narrative": "...",
+  "phase": "choices",
+  "phase_index": 0,
+  "phase_sequence": ["choices"],
+  "phase_results": [],
+  "choices": [...],
+  "combat": null,
+  "pending_items": [],
+  "is_death": false,
+  "is_victory": false,
+  "is_alive": true,
   "version": 6
 }
 ```
@@ -775,14 +803,15 @@ Uses the generic wizard system. **Explicit initialization**: the player must cal
 Start the book advance wizard. Creates `character_wizard_progress` row and sets `active_wizard_id`. Returns the first wizard step.
 
 ```json
-// Request (no body needed)
+// Request
+{ "version": 5 }
 
 // Response 201
 {
   "wizard_type": "book_advance",
   "step": "pick_disciplines",
   "step_index": 0,
-  "total_steps": 4,
+  "total_steps": 3,
   "book": { "id": 2, "title": "Fire on the Water" }
 }
 ```
@@ -799,55 +828,40 @@ Returns the current wizard step. Single canonical path for both character creati
   "wizard_type": "book_advance",
   "step": "pick_disciplines",
   "step_index": 0,
-  "total_steps": 4,
-  "book": { "id": 2, "title": "Fire on the Water" },
+  "total_steps": 3,
   "available_disciplines": [
     { "id": 11, "name": "Tracking", "description": "..." }
   ],
   "disciplines_to_pick": 1
 }
 
-// Response 200 — Step 2: Equipment selection (pick_equipment)
-{
-  "wizard_type": "book_advance",
-  "step": "pick_equipment",
-  "step_index": 1,
-  "total_steps": 4,
-  "available_equipment": [
-    { "item_name": "Sword", "item_type": "weapon", "category": "weapons" },
-    { "item_name": "Healing Potion", "item_type": "backpack", "category": "backpack" }
-  ],
-  "pick_limit": 2
-}
-
-// Response 200 — Step 3: Inventory adjustment (inventory_adjust)
+// Response 200 — Step 2: Inventory adjustment (inventory_adjust)
 {
   "wizard_type": "book_advance",
   "step": "inventory_adjust",
-  "step_index": 2,
-  "total_steps": 4,
-  "current_weapons": [{ "name": "Sword" }, { "name": "Axe" }],
+  "step_index": 1,
+  "total_steps": 3,
+  "current_weapons": [
+    { "item_name": "Sword", "item_type": "weapon", "is_equipped": true },
+    { "item_name": "Axe", "item_type": "weapon", "is_equipped": false }
+  ],
   "max_weapons": 2,
-  "current_backpack": ["Healing Potion"],
-  "max_backpack": 8,
-  "special_items_carrying": ["Map"]
+  "current_backpack": [
+    { "item_name": "Healing Potion", "item_type": "backpack", "is_equipped": false }
+  ],
+  "max_backpack_items": 8,
+  "current_special": [
+    { "item_name": "Map", "item_type": "special", "is_equipped": false }
+  ]
 }
 
-// Response 200 — Step 4: Confirmation (confirm)
+// Response 200 — Step 3: Confirmation (confirm)
 {
   "wizard_type": "book_advance",
   "step": "confirm",
-  "step_index": 3,
-  "total_steps": 4,
-  "summary": {
-    "new_book": "Fire on the Water",
-    "combat_skill": 14,
-    "endurance_base": 26,
-    "endurance_max": 28,
-    "disciplines": ["Camouflage", "Sixth Sense", "Healing", "Mindblast", "Mind Over Matter", "Tracking"],
-    "weapons": ["Sword", "Axe"],
-    "gold": 15
-  }
+  "step_index": 2,
+  "total_steps": 3,
+  "character_preview": { ... }
 }
 ```
 
@@ -856,14 +870,14 @@ Returns the current wizard step. Single canonical path for both character creati
 Submit the current step's choice. Single canonical path for both creation and advance wizards.
 
 ```json
-// Step 1 request
-{ "discipline_id": 11 }
+// Step 1 request (pick_disciplines)
+{ "discipline_ids": [11], "weapon_skill_type": null, "version": 5 }
 
-// Step 2 request
-{ "keep_weapons": ["Sword"], "keep_backpack": ["Healing Potion"] }
+// Step 2 request (inventory_adjust)
+{ "keep_weapons": ["Sword"], "keep_backpack": ["Healing Potion"], "version": 6 }
 
-// Step 3 request
-{ "confirm": true }
+// Step 3 request (confirm)
+{ "confirm": true, "version": 7 }
 
 // Final response 200
 {
@@ -1108,6 +1122,13 @@ The `error_code` field is a machine-readable string. The frontend branches on `e
 | `MAX_CHARACTERS` | 400 | User has reached their maximum character limit |
 | `INVALID_ROLL_TOKEN` | 400 | Roll token is expired, malformed, or does not match the request |
 | `RATE_LIMITED` | 429 | Too many requests — rate limit exceeded on this endpoint |
+| `NOT_IN_RANDOM_PHASE` | 409 | Roll requested but character is not in the random phase and has no pending choice roll |
+| `REDIRECT_DEPTH_EXCEEDED` | 409 | Scene redirect chain exceeded `MAX_REDIRECT_DEPTH` (5) — misconfigured scene data |
+| `ADVANCE_NOT_ALLOWED` | 409 | Book advance attempted when not at a victory scene or wizard already active |
+| `NO_NEXT_BOOK` | 404 | No next book configured for the current book (end of series) |
+| `CHARACTER_ALIVE` | 400 | Restart attempted but character is still alive |
+| `NOT_AT_VICTORY` | 400 | Replay or advance attempted but character is not at a victory scene |
+| `ITEM_MANDATORY` | 400 | Decline attempted on a mandatory item — player must accept it |
 
 ### HTTP Status Summary
 

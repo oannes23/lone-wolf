@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.player import Character, CharacterEvent
+from app.models.player import Character, CharacterEvent, DecisionLog
 
 
 def log_character_event(
@@ -67,3 +67,42 @@ def log_character_event(
     db.add(event)
     db.flush()
     return event
+
+
+def log_decision(
+    db: Session,
+    character: Character,
+    from_scene_id: int,
+    to_scene_id: int,
+    choice_id: int | None,
+    action_type: str,
+    details: dict | None = None,
+) -> DecisionLog:
+    """Create and persist a decision_log row.
+
+    Args:
+        db: Database session (caller owns the transaction boundary).
+        character: The character whose decision is being logged.
+        from_scene_id: The scene the character navigated away from.
+        to_scene_id: The scene the character is navigating to.
+        choice_id: The Choice that triggered the navigation, or None.
+        action_type: Semantic type (e.g. ``"choice"``, ``"random"``,
+            ``"restart"``, ``"replay"``).
+        details: Optional JSON-serialisable details dict.
+
+    Returns:
+        The newly created and flushed ``DecisionLog`` ORM instance.
+    """
+    entry = DecisionLog(
+        character_id=character.id,
+        run_number=character.current_run,
+        from_scene_id=from_scene_id,
+        to_scene_id=to_scene_id,
+        choice_id=choice_id,
+        action_type=action_type,
+        details=json.dumps(details) if details is not None else None,
+        created_at=datetime.now(UTC),
+    )
+    db.add(entry)
+    db.flush()
+    return entry
