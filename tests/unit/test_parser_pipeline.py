@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.parser.pipeline import PipelineResult, run_pipeline
-from app.parser.types import BookData, ChoiceData, CombatData, SceneData
+from app.parser.types import BookData, ChoiceData, CombatData, EnrichmentResult, SceneData
 
 
 # ---------------------------------------------------------------------------
@@ -92,15 +92,11 @@ def _standard_patches(
 
 @contextlib.contextmanager
 def _patch_llm_enrich(return_value=None):
-    """Patch _enrich_with_llm to return a no-op result.
+    """Patch _enrich_with_llm to return a no-op EnrichmentResult.
 
     When no return_value is given, the mock passes through the choice_dicts,
     encounter_dicts, item_dicts, and random_outcome_dicts arguments unchanged
     and returns empty entity/ref lists.
-
-    Return tuple: (choice_dicts, entity_game_objects, entity_refs,
-                    encounter_dicts, item_dicts, random_outcome_dicts,
-                    llm_call_count, warnings)
     """
     if return_value is not None:
         with patch("app.parser.pipeline._enrich_with_llm", return_value=return_value) as m:
@@ -110,9 +106,12 @@ def _patch_llm_enrich(return_value=None):
                          encounter_dicts=None, item_dicts=None,
                          random_outcome_dicts=None,
                          skip_choice_rewrite=False, **kwargs):
-            return (choice_dicts, [], [],
-                    encounter_dicts or [], item_dicts or [],
-                    random_outcome_dicts or [], 0, [])
+            return EnrichmentResult(
+                choice_dicts=choice_dicts,
+                encounter_dicts=encounter_dicts or [],
+                item_dicts=item_dicts or [],
+                random_outcome_dicts=random_outcome_dicts or [],
+            )
 
         with patch("app.parser.pipeline._enrich_with_llm", side_effect=_passthrough) as m:
             yield m
@@ -231,7 +230,7 @@ class TestSkipLlm:
     def test_skip_llm_passes_flag_to_enrich(self) -> None:
         with _standard_patches():
             with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
-                mock_enrich.return_value = ([], [], [], [], [], [], 0, [])
+                mock_enrich.return_value = EnrichmentResult()
                 run_pipeline("/fake/01fftd.xhtml", {"skip_llm": True, "dry_run": True})
         call_kwargs = mock_enrich.call_args.kwargs
         assert call_kwargs.get("skip_llm") is True
@@ -240,7 +239,7 @@ class TestSkipLlm:
         with _standard_patches():
             with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
                 # Return 0 rewrites — as skip_llm would produce
-                mock_enrich.return_value = ([], [], [], [], [], [], 0, [])
+                mock_enrich.return_value = EnrichmentResult()
                 result = run_pipeline("/fake/01fftd.xhtml", {"skip_llm": True, "dry_run": True})
         assert result.counts.get("llm_calls", 0) == 0
 
@@ -254,7 +253,7 @@ class TestSkipEntities:
     def test_skip_entities_passes_flag_to_enrich(self) -> None:
         with _standard_patches():
             with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
-                mock_enrich.return_value = ([], [], [], [], [], [], 0, [])
+                mock_enrich.return_value = EnrichmentResult()
                 run_pipeline("/fake/01fftd.xhtml", {"skip_entities": True, "dry_run": True})
         call_kwargs = mock_enrich.call_args.kwargs
         assert call_kwargs.get("skip_entities") is True
@@ -291,7 +290,7 @@ class TestWarningCollection:
         llm_warning = "llm entity warning"
         with _standard_patches():
             with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
-                mock_enrich.return_value = ([], [], [], [], [], [], 0, [llm_warning])
+                mock_enrich.return_value = EnrichmentResult(warnings=[llm_warning])
                 result = run_pipeline("/fake/01fftd.xhtml", {"dry_run": True})
         assert any(llm_warning in w for w in result.warnings)
 
@@ -309,6 +308,35 @@ class TestWarningCollection:
                 with _patch_load():
                     result = run_pipeline("/fake/01fftd.xhtml", {})
         assert any("Illustration copy failed" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# PipelineResult contains correct counts
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# --entities-only: _enrich_with_llm receives skip_choice_rewrite=True
+# ---------------------------------------------------------------------------
+
+
+class TestEntitiesOnly:
+    def test_entities_only_passes_skip_choice_rewrite_true(self) -> None:
+        with _standard_patches():
+            with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
+                mock_enrich.return_value = EnrichmentResult()
+                run_pipeline("/fake/01fftd.xhtml", {"entities_only": True, "dry_run": True})
+        call_kwargs = mock_enrich.call_args.kwargs
+        assert call_kwargs.get("skip_choice_rewrite") is True
+        assert call_kwargs.get("skip_llm") is False
+        assert call_kwargs.get("skip_entities") is False
+
+    def test_entities_only_still_returns_result(self) -> None:
+        with _standard_patches():
+            with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
+                mock_enrich.return_value = EnrichmentResult()
+                result = run_pipeline("/fake/01fftd.xhtml", {"entities_only": True, "dry_run": True})
+        assert isinstance(result, PipelineResult)
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +373,6 @@ class TestPipelineResultCounts:
         ]
         with _standard_patches():
             with patch("app.parser.pipeline._enrich_with_llm") as mock_enrich:
-                mock_enrich.return_value = ([], entity_game_objects, [], [], [], [], 0, [])
+                mock_enrich.return_value = EnrichmentResult(entity_game_objects=entity_game_objects)
                 result = run_pipeline("/fake/01fftd.xhtml", {"dry_run": True})
         assert result.counts["game_objects"] == 1

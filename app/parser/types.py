@@ -97,3 +97,17 @@ class SceneAnalysisData:
     combat_modifiers: list[dict] = field(default_factory=list)
     conditions: list[dict] = field(default_factory=list)
     scene_flags: dict = field(default_factory=dict)
+
+
+@dataclass
+class EnrichmentResult:
+    """Result of the LLM enrichment + merge phase in the parser pipeline."""
+
+    choice_dicts: list[dict] = field(default_factory=list)
+    entity_game_objects: list[dict] = field(default_factory=list)
+    entity_refs: list[dict] = field(default_factory=list)
+    encounter_dicts: list[dict] = field(default_factory=list)
+    item_dicts: list[dict] = field(default_factory=list)
+    random_outcome_dicts: list[dict] = field(default_factory=list)
+    llm_call_count: int = 0
+    warnings: list[str] = field(default_factory=list)

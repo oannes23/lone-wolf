@@ -39,7 +39,7 @@ class TestMergeCombatEncounters:
 
     def test_llm_wins_when_present(self) -> None:
         manual = [{"enemy_name": "Kraan", "enemy_cs": 15, "enemy_end": 20, "ordinal": 1}]
-        llm = [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}]
+        llm = [{"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1}]
         merged, warnings = merge_combat_encounters(manual, llm, scene_number=1)
         assert len(merged) == 1
         assert merged[0]["enemy_name"] == "Kraan"
@@ -48,7 +48,7 @@ class TestMergeCombatEncounters:
 
     def test_stat_disagreement_generates_warning(self) -> None:
         manual = [{"enemy_name": "Kraan", "enemy_cs": 15, "enemy_end": 20, "ordinal": 1}]
-        llm = [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}]
+        llm = [{"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1}]
         _, warnings = merge_combat_encounters(manual, llm, scene_number=5)
         assert len(warnings) == 1
         assert "MERGE_CONFLICT" in warnings[0]
@@ -60,7 +60,7 @@ class TestMergeCombatEncounters:
             {"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1},
             {"enemy_name": "Giak", "enemy_cs": 10, "enemy_end": 12, "ordinal": 2},
         ]
-        llm = [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}]
+        llm = [{"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1}]
         merged, warnings = merge_combat_encounters(manual, llm, scene_number=1)
         names = {e["enemy_name"] for e in merged}
         assert "Kraan" in names
@@ -69,7 +69,7 @@ class TestMergeCombatEncounters:
 
     def test_llm_only_enemy_included(self) -> None:
         manual = []
-        llm = [{"enemy_name": "Helghast", "combat_skill": 22, "endurance": 30, "ordinal": 1}]
+        llm = [{"enemy_name": "Helghast", "enemy_cs": 22, "enemy_end": 30, "ordinal": 1}]
         merged, warnings = merge_combat_encounters(manual, llm, scene_number=1)
         assert len(merged) == 1
         assert merged[0]["enemy_name"] == "Helghast"
@@ -77,7 +77,7 @@ class TestMergeCombatEncounters:
 
     def test_agreement_no_warnings(self) -> None:
         manual = [{"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1}]
-        llm = [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}]
+        llm = [{"enemy_name": "Kraan", "enemy_cs": 16, "enemy_end": 24, "ordinal": 1}]
         _, warnings = merge_combat_encounters(manual, llm, scene_number=1)
         assert not any("combat_stats" in w for w in warnings)
 
@@ -130,6 +130,14 @@ class TestMergeItems:
         merged, warnings = merge_items([], [], scene_number=1)
         assert merged == []
         assert warnings == []
+
+    def test_merge_items_llm_empty_list(self) -> None:
+        """When LLM returns an empty list, manual item is included with a warning."""
+        manual_item = {"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"}
+        merged, warnings = merge_items([manual_item], [], scene_number=1)
+        assert len(merged) == 1
+        assert merged[0]["item_name"] == "Sword"
+        assert any("manual_only=Sword" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +222,12 @@ class TestMergeEvasion:
         assert merged == manual
         assert warnings == []
 
+    def test_merge_evasion_missing_damage_key(self) -> None:
+        """LLM evasion dict with no 'damage' key defaults damage to 0."""
+        llm = {"rounds": 3, "target_scene": 85}
+        merged, warnings = merge_evasion(None, llm, scene_number=1)
+        assert merged == (3, 85, 0)
+
 
 # ---------------------------------------------------------------------------
 # merge_combat_modifiers
@@ -245,6 +259,14 @@ class TestMergeCombatModifiers:
     def test_empty_both(self) -> None:
         merged, warnings = merge_combat_modifiers([], [], scene_number=1)
         assert merged == []
+        assert warnings == []
+
+    def test_merge_combat_modifiers_llm_only_no_warning(self) -> None:
+        """When only LLM provides a modifier (manual is empty), it is included without a warning."""
+        llm_mod = {"modifier_type": "undead", "value": None}
+        merged, warnings = merge_combat_modifiers([], [llm_mod], scene_number=1)
+        assert len(merged) == 1
+        assert merged[0]["modifier_type"] == "undead"
         assert warnings == []
 
 
@@ -285,6 +307,20 @@ class TestMergeConditions:
         ]
         merged, warnings = merge_conditions(manual, [], scene_number=1)
         assert merged[0]["condition_type"] == "gold"
+        assert warnings == []
+
+    def test_merge_conditions_nonexistent_ordinal(self) -> None:
+        """LLM condition for an ordinal that matches no manual choice is silently ignored."""
+        manual = [
+            {"ordinal": 1, "condition_type": None, "condition_value": None},
+        ]
+        llm_conds = [
+            {"choice_ordinal": 99, "condition_type": "discipline", "condition_value": "Tracking"},
+        ]
+        merged, warnings = merge_conditions(manual, llm_conds, scene_number=1)
+        # The manual choice for ordinal 1 is unchanged
+        assert merged[0]["condition_type"] is None
+        # No warnings emitted for the phantom ordinal
         assert warnings == []
 
 

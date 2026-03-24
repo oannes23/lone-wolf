@@ -48,12 +48,16 @@ Rewritten choice (no page numbers):"""
 # Cache helpers
 # ---------------------------------------------------------------------------
 
+# IMPORTANT: Bump the version constants below when the corresponding prompt
+# template changes, otherwise stale cached results will be served silently.
+_CHOICE_REWRITE_VERSION = "v1"
+
 
 def _cache_key(raw_text: str, scene_narrative: str) -> str:
-    """Return a deterministic SHA-256 hex digest cache key for the given inputs.
+    """Return a deterministic SHA-256 hex digest cache key for choice rewriting.
 
-    The key is derived from the full prompt template rendered with the provided
-    inputs, so any change to the text or narrative produces a different key.
+    Includes a version prefix so that prompt template changes invalidate the
+    cache automatically when the version is bumped.
 
     Args:
         raw_text: The raw choice text from the book.
@@ -66,7 +70,8 @@ def _cache_key(raw_text: str, scene_narrative: str) -> str:
         scene_context=scene_narrative[:500],
         raw_text=raw_text,
     )
-    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    content = f"{_CHOICE_REWRITE_VERSION}|{prompt}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _get_cached(cache_key: str) -> str | None:
@@ -115,6 +120,37 @@ def _set_cached(cache_key: str, result: str, prompt: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Anthropic client resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_client(client: object | None, context: str = "") -> object | None:
+    """Resolve or lazily create an Anthropic client.
+
+    When *client* is already provided, returns it unchanged.  Otherwise
+    attempts ``anthropic.Anthropic()`` using the ``ANTHROPIC_API_KEY`` env
+    var.  Returns ``None`` on any failure (missing package, missing key, etc.).
+
+    Args:
+        client: An existing Anthropic client instance, or ``None``.
+        context: Optional label for the error log message (e.g. ``"choice rewrite"``).
+
+    Returns:
+        The resolved client, or ``None`` on failure.
+    """
+    if client is not None:
+        return client
+    try:
+        import anthropic  # noqa: PLC0415
+
+        return anthropic.Anthropic()
+    except Exception as exc:  # noqa: BLE001
+        ctx = f" ({context})" if context else ""
+        logger.error("Failed to create Anthropic client%s: %s", ctx, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -160,15 +196,9 @@ def rewrite_choice(
             logger.debug("Cache hit for choice: %r", raw_text[:60])
             return cached
 
-    # Resolve or create the Anthropic client
+    client = _resolve_client(client, "choice rewrite")
     if client is None:
-        try:
-            import anthropic
-
-            client = anthropic.Anthropic()
-        except Exception as exc:
-            logger.error("Failed to create Anthropic client: %s", exc)
-            return raw_text
+        return raw_text
 
     try:
         # client is typed as object to avoid a hard import at module level;
@@ -241,6 +271,10 @@ Return as JSON array. Only include entities that are clearly named (not generic 
 Passage: {narrative}"""
 
 
+# IMPORTANT: Bump when the entity extraction prompt template changes.
+_ENTITY_EXTRACT_VERSION = "v1"
+
+
 def _entity_cache_key(narrative: str, book_id: int) -> str:
     """Return a deterministic cache key for entity extraction.
 
@@ -251,8 +285,12 @@ def _entity_cache_key(narrative: str, book_id: int) -> str:
     Returns:
         A 64-character lowercase hex string.
     """
-    content = f"book:{book_id}|entity_extract|{narrative[:1000]}"
+    content = f"{_ENTITY_EXTRACT_VERSION}|book:{book_id}|entity_extract|{narrative[:1000]}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+# IMPORTANT: Bump when the relationship inference prompt template changes.
+_RELATIONSHIP_VERSION = "v1"
 
 
 def _relationship_cache_key(entities: list[dict], scene_number: int | str) -> str:
@@ -266,7 +304,7 @@ def _relationship_cache_key(entities: list[dict], scene_number: int | str) -> st
         A 64-character lowercase hex string.
     """
     names = sorted(e.get("name", "") for e in entities)
-    content = f"scene:{scene_number}|rel_infer|{','.join(names)}"
+    content = f"{_RELATIONSHIP_VERSION}|scene:{scene_number}|rel_infer|{','.join(names)}"
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
@@ -345,6 +383,11 @@ def extract_entities(
 ) -> list[dict]:
     """Extract named entities from a scene narrative using Claude Haiku.
 
+    .. deprecated::
+        Use :func:`analyze_scene` instead, which combines entity extraction
+        with relationship inference and structured mechanics detection in a
+        single LLM call.
+
     Entities are deduplicated against *existing_catalog* (case-insensitive on
     name) so that previously seen entities are not returned again.
 
@@ -371,6 +414,14 @@ def extract_entities(
         A list of entity dicts for newly discovered entities not in the
         existing catalog.  Returns an empty list on any LLM or parse failure.
     """
+    import warnings as _warnings  # noqa: PLC0415
+
+    _warnings.warn(
+        "extract_entities() is deprecated; use analyze_scene() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if skip_entities:
         return []
 
@@ -387,15 +438,9 @@ def extract_entities(
             if isinstance(parsed, list):
                 return _filter_new_entities(parsed, existing_catalog)
 
-    # Resolve or create the Anthropic client
+    client = _resolve_client(client, "entity extraction")
     if client is None:
-        try:
-            import anthropic  # noqa: PLC0415
-
-            client = anthropic.Anthropic()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to create Anthropic client: %s", exc)
-            return []
+        return []
 
     prompt = _ENTITY_PROMPT_TEMPLATE.format(narrative=narrative[:1000])
 
@@ -477,6 +522,10 @@ def infer_relationships(
 ) -> list[dict]:
     """Infer tagged relationships between entities using Claude Haiku.
 
+    .. deprecated::
+        Use :func:`analyze_scene` instead, which includes relationship
+        inference as part of the unified scene analysis.
+
     Returns a list of ref dicts following the tagged ref pattern::
 
         {
@@ -499,6 +548,14 @@ def infer_relationships(
         A list of relationship ref dicts.  Returns an empty list when fewer than
         2 entities are provided, or on LLM / parse failure.
     """
+    import warnings as _warnings  # noqa: PLC0415
+
+    _warnings.warn(
+        "infer_relationships() is deprecated; use analyze_scene() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if len(entities) < 2:
         return []
 
@@ -515,15 +572,9 @@ def infer_relationships(
             if isinstance(parsed, list):
                 return _filter_relationships(parsed)
 
-    # Resolve or create the Anthropic client
+    client = _resolve_client(client, "relationship inference")
     if client is None:
-        try:
-            import anthropic  # noqa: PLC0415
-
-            client = anthropic.Anthropic()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to create Anthropic client: %s", exc)
-            return []
+        return []
 
     entities_json = json.dumps(
         [{"name": e.get("name"), "kind": e.get("kind")} for e in entities],
@@ -563,7 +614,7 @@ def infer_relationships(
 # Scene analysis — unified structured extraction
 # ---------------------------------------------------------------------------
 
-_SCENE_ANALYSIS_VERSION = "v1"
+_SCENE_ANALYSIS_VERSION = "v3"
 
 _SCENE_ANALYSIS_SYSTEM = """\
 You are analyzing a passage from a Lone Wolf choose-your-own-adventure gamebook.
@@ -574,28 +625,37 @@ Schema:
 {
   "entities": [{"kind": "character|location|creature|organization", "name": "...", "description": "...", "aliases": []}],
   "relationships": [{"source_name": "...", "target_name": "...", "tags": ["spatial", "located_in"]}],
-  "combat_encounters": [{"enemy_name": "...", "combat_skill": 16, "endurance": 24, "ordinal": 1}],
+  "combat_encounters": [{"enemy_name": "...", "combat_skill": 16, "endurance": 24, "ordinal": 1, "mindblast_immune": false, "condition_type": "discipline|item|null", "condition_value": "Camouflage|null"}],
   "items": [{"item_name": "...", "item_type": "weapon|backpack|special|gold|meal", "quantity": 1, "action": "gain|lose"}],
-  "random_outcomes": [{"range_min": 0, "range_max": 4, "effect_type": "endurance_change|gold_change|scene_redirect|item_gain|item_loss|meal_change", "effect_value": "...", "narrative_text": "..."}],
+  "random_outcomes": [{"range_min": 0, "range_max": 4, "effect_type": "endurance_change|gold_change|scene_redirect|item_gain|item_loss|meal_change", "effect_value": "...", "narrative_text": "...", "roll_group": 0}],
   "evasion": {"rounds": 3, "target_scene": 85, "damage": 0},
-  "combat_modifiers": [{"modifier_type": "cs_bonus|cs_penalty|double_damage|undead|enemy_mindblast", "value": 2}],
+  "combat_modifiers": [{"modifier_type": "cs_bonus|cs_penalty|double_damage|undead|enemy_mindblast|helghast", "value": 2}],
   "conditions": [{"choice_ordinal": 1, "condition_type": "discipline|item|gold|random", "condition_value": "Tracking"}],
   "scene_flags": {"must_eat": false, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": false}
 }
 
 Rules:
-- combat_encounters: Only extract if explicit stats with COMBAT SKILL and ENDURANCE numbers appear.
-- items: Include Gold Crowns with exact quantities. Meals as item_type "meal". Named weapons/equipment as appropriate types.
+- combat_encounters: Only extract if explicit stats with COMBAT SKILL and ENDURANCE numbers appear. For multi-enemy scenes, assign ordinal 1, 2, 3... in the order enemies are fought. Set mindblast_immune to true if the enemy is immune to Mindblast. Set condition_type/condition_value if the combat only occurs under certain conditions (e.g. "If you do not have Camouflage, you must fight" → condition_type: "discipline", condition_value: "Camouflage").
+- items: Include Gold Crowns with exact quantities. Meals as item_type "meal". Named weapons/equipment as appropriate types. If no specific quantity is given, omit the item.
 - item_type: "weapon" for swords/axes/daggers/etc, "backpack" for general items, "special" for unique quest items, "gold" for Gold Crowns, "meal" for meals/food/rations.
 - action: "gain" if the player receives/finds/takes the item, "lose" if taken away or lost.
-- random_outcomes: Only if the text describes a Random Number Table with numbered outcome bands (0-9 ranges).
+- random_outcomes: Only if the text describes a Random Number Table with numbered outcome bands (0-9 ranges). Use roll_group 0 for the first table, 1 for a second independent table in the same scene, etc.
 - effect_value: For scene_redirect use the target scene number as a string. For endurance/gold/meal changes use a signed integer string (e.g. "-3", "+2").
-- evasion: Only if explicit evasion/escape rules with a round threshold are stated. Set evasion to null if none.
-- combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage.
+- evasion: Only if explicit evasion/escape rules are stated. Use rounds: 0 if evasion is allowed from the start of combat. Set evasion to null if none.
+- combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage/helghast.
 - conditions: Extract gate conditions from the choice text (e.g. "If you have the Kai Discipline of Tracking"). For OR conditions use JSON: {"any": ["Tracking", "Huntmastery"]}.
 - entities: Only clearly named entities, not generic references like "the guard" or "a merchant".
-- scene_flags: Set each flag only if clearly indicated by the text. Default all to false.
-- Return empty arrays [] and null for absent fields. Do not invent mechanics not present in the text."""
+- scene_flags: is_death = true if the scene ends the adventure in failure with no outgoing choices. is_victory = true if the scene completes the book/quest successfully. must_eat = true if the player must eat a meal. loses_backpack = true if the player loses their backpack contents. mindblast_immune = true if a combat enemy is immune to Mindblast. Default all to false.
+- Return empty arrays [] and null for absent fields. Do not invent mechanics not present in the text.
+
+Example — simple scene:
+Input: "You arrive at a small village. A merchant offers to sell you a Meal for 1 Gold Crown. If you have the Kai Discipline of Sixth Sense, turn to 141. If you wish to continue north, turn to 85."
+Choices: ["1. If you have the Kai Discipline of Sixth Sense, turn to 141.", "2. If you wish to continue north, turn to 85."]
+Output: {"entities": [{"kind": "location", "name": "Village", "description": "A small village with a merchant", "aliases": []}], "relationships": [], "combat_encounters": [], "items": [], "random_outcomes": [], "evasion": null, "combat_modifiers": [], "conditions": [{"choice_ordinal": 1, "condition_type": "discipline", "condition_value": "Sixth Sense"}], "scene_flags": {"must_eat": false, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": false}}
+
+Example — combat scene with evasion and items:
+Input: "A Kraan swoops from the sky. It is immune to Mindblast. You must fight it. Kraan: COMBAT SKILL 16 ENDURANCE 24. You may evade combat after 3 rounds by turning to 85, but you lose 2 ENDURANCE points. You find a Sword and 7 Gold Crowns. You must eat a Meal here."
+Output: {"entities": [{"kind": "creature", "name": "Kraan", "description": "A flying reptilian creature", "aliases": []}], "relationships": [], "combat_encounters": [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1}], "items": [{"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"}, {"item_name": "Gold Crowns", "item_type": "gold", "quantity": 7, "action": "gain"}], "random_outcomes": [], "evasion": {"rounds": 3, "target_scene": 85, "damage": 2}, "combat_modifiers": [], "conditions": [], "scene_flags": {"must_eat": true, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": true}}"""
 
 _SCENE_ANALYSIS_USER = """\
 Book {book_number}, Scene {scene_number}:
@@ -614,7 +674,7 @@ _VALID_EFFECT_TYPES = frozenset({
     "item_gain", "item_loss", "meal_change",
 })
 _VALID_MODIFIER_TYPES = frozenset({
-    "cs_bonus", "cs_penalty", "double_damage", "undead", "enemy_mindblast",
+    "cs_bonus", "cs_penalty", "double_damage", "undead", "enemy_mindblast", "helghast",
 })
 _VALID_CONDITION_TYPES = frozenset({"discipline", "item", "gold", "random"})
 _VALID_FLAG_KEYS = frozenset({
@@ -628,11 +688,11 @@ def _scene_analysis_cache_key(
     """Return a deterministic cache key for unified scene analysis.
 
     The key encodes the schema version (``_SCENE_ANALYSIS_VERSION``), book,
-    scene, and the first 2000 characters of the narrative.  Changing the
+    scene, and the first 3000 characters of the narrative.  Changing the
     version string invalidates all prior cache entries.
 
     Args:
-        narrative: Scene narrative text (first 2000 chars are used).
+        narrative: Scene narrative text (first 3000 chars are used).
         book_id: Numeric book identifier.
         scene_number: Scene number within the book.
 
@@ -641,7 +701,7 @@ def _scene_analysis_cache_key(
     """
     content = (
         f"{_SCENE_ANALYSIS_VERSION}|book:{book_id}|scene:{scene_number}"
-        f"|scene_analysis|{narrative[:2000]}"
+        f"|scene_analysis|{narrative[:3000]}"
     )
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -732,12 +792,23 @@ def _validate_scene_analysis(raw: object) -> dict | None:
             cs = _coerce_int(c.get("combat_skill"))
             end = _coerce_int(c.get("endurance"))
             if name and cs is not None and end is not None:
-                validated_combats.append({
+                enc: dict = {
                     "enemy_name": name,
-                    "combat_skill": cs,
-                    "endurance": end,
+                    "enemy_cs": cs,
+                    "enemy_end": end,
                     "ordinal": c.get("ordinal", 1),
-                })
+                    "mindblast_immune": bool(c.get("mindblast_immune", False)),
+                }
+                # Optional conditional combat fields
+                cond_type = c.get("condition_type")
+                if cond_type and cond_type in _VALID_CONDITION_TYPES:
+                    cond_val = c.get("condition_value")
+                    enc["condition_type"] = cond_type
+                    enc["condition_value"] = str(cond_val) if cond_val else None
+                else:
+                    enc["condition_type"] = None
+                    enc["condition_value"] = None
+                validated_combats.append(enc)
     result["combat_encounters"] = validated_combats
 
     # Items
@@ -776,6 +847,7 @@ def _validate_scene_analysis(raw: object) -> dict | None:
                     "effect_type": etype,
                     "effect_value": str(o.get("effect_value", "")),
                     "narrative_text": o.get("narrative_text"),
+                    "roll_group": _coerce_int(o.get("roll_group")) or 0,
                 })
     result["random_outcomes"] = validated_outcomes
 
@@ -904,15 +976,9 @@ def analyze_scene(
                 )
                 return SceneAnalysisData(**validated)
 
-    # Resolve or create the Anthropic client
+    client = _resolve_client(client, "scene analysis")
     if client is None:
-        try:
-            import anthropic  # noqa: PLC0415
-
-            client = anthropic.Anthropic()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to create Anthropic client: %s", exc)
-            return None
+        return None
 
     # Build choices text for the prompt
     if choices_raw:
@@ -925,14 +991,14 @@ def analyze_scene(
     user_prompt = _SCENE_ANALYSIS_USER.format(
         book_number=book_id,
         scene_number=scene_number,
-        narrative=narrative[:2000],
+        narrative=narrative[:3000],
         choices_text=choices_text,
     )
 
     try:
         message = client.messages.create(  # type: ignore[union-attr]
             model=_MODEL,
-            max_tokens=2048,
+            max_tokens=4096,
             system=_SCENE_ANALYSIS_SYSTEM,
             messages=[{"role": "user", "content": user_prompt}],
         )

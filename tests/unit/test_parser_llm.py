@@ -524,6 +524,32 @@ class TestValidateSceneAnalysis:
         assert len(result["random_outcomes"]) == 1
         assert result["random_outcomes"][0]["effect_value"] == "-2"  # converted to str
 
+    def test_non_list_entities_returns_empty(self) -> None:
+        result = _validate_scene_analysis({"entities": "not a list"})
+        assert result is not None
+        assert result["entities"] == []
+
+    def test_non_int_quantity_defaults_to_one(self) -> None:
+        raw = {
+            "items": [
+                {"item_name": "Sword", "item_type": "weapon", "quantity": "five", "action": "gain"},
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["items"]) == 1
+        assert result["items"][0]["quantity"] == 1
+
+    def test_float_combat_skill_coerced(self) -> None:
+        raw = {
+            "combat_encounters": [
+                {"enemy_name": "Kraan", "combat_skill": 16.0, "endurance": 24, "ordinal": 1},
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["combat_encounters"]) == 1
+        assert result["combat_encounters"][0]["enemy_cs"] == 16
+        assert isinstance(result["combat_encounters"][0]["enemy_cs"], int)
+
 
 # ---------------------------------------------------------------------------
 # Scene analysis — analyze_scene function
@@ -574,7 +600,7 @@ class TestAnalyzeScene:
         )
         call_kwargs = client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
-        assert call_kwargs["max_tokens"] == 2048
+        assert call_kwargs["max_tokens"] == 4096
         assert "system" in call_kwargs
         assert "combat_encounters" in call_kwargs["system"]
         user_content = call_kwargs["messages"][0]["content"]
@@ -679,3 +705,31 @@ class TestAnalyzeScene:
         assert result is not None
         assert result.scene_flags["must_eat"] is False
         assert result.scene_flags["is_death"] is False
+
+    def test_client_none_anthropic_import_fails_returns_none(self, tmp_cache):
+        """When no client is provided and Anthropic() raises, return None gracefully."""
+        import sys
+        import anthropic as real_anthropic
+        mock_anthropic = MagicMock(spec=real_anthropic)
+        mock_anthropic.Anthropic.side_effect = RuntimeError("No API key")
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+            result = analyze_scene(
+                COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+                existing_catalog={}, client=None,
+            )
+        assert result is None
+
+    def test_cache_hit_invalid_data_falls_through_to_llm(self, tmp_cache):
+        """When cache has invalid data, fall through and make a fresh LLM call."""
+        # Prime cache with a valid JSON array (not a dict — fails _validate_scene_analysis)
+        key = _scene_analysis_cache_key(COMBAT_NARRATIVE, 1, 42)
+        _set_cached(key, "[1, 2, 3]", "old prompt")
+
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=42,
+            existing_catalog={}, client=client,
+        )
+        # Should have fallen through to LLM
+        client.messages.create.assert_called_once()
+        assert isinstance(result, SceneAnalysisData)

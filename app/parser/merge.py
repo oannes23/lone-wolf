@@ -68,12 +68,12 @@ def merge_combat_encounters(
         for me in manual:
             for le in llm:
                 if me["enemy_name"].lower() == le["enemy_name"].lower():
-                    if me.get("enemy_cs") != le.get("combat_skill") or me.get("enemy_end") != le.get("endurance"):
+                    if me.get("enemy_cs") != le.get("enemy_cs") or me.get("enemy_end") != le.get("enemy_end"):
                         warnings.append(
                             f"MERGE_CONFLICT scene={scene_number} field=combat_stats "
                             f"enemy={me['enemy_name']}: "
                             f"manual=CS{me.get('enemy_cs')}/END{me.get('enemy_end')} "
-                            f"llm=CS{le.get('combat_skill')}/END{le.get('endurance')} "
+                            f"llm=CS{le.get('enemy_cs')}/END{le.get('enemy_end')} "
                             f"winner=llm"
                         )
 
@@ -84,8 +84,8 @@ def merge_combat_encounters(
     for le in llm:
         merged.append({
             "enemy_name": le["enemy_name"],
-            "enemy_cs": le["combat_skill"],
-            "enemy_end": le["endurance"],
+            "enemy_cs": le.get("enemy_cs", 0),
+            "enemy_end": le.get("enemy_end", 0),
             "ordinal": le.get("ordinal", len(merged) + 1),
         })
 

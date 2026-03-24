@@ -196,18 +196,55 @@ def _transform_items(scene_dicts: list[dict]) -> tuple[list[dict], list[str]]:
     return item_dicts, warnings
 
 
+def _format_effect_value(effect_type: str, raw_value: str) -> str:
+    """Convert a flat effect_value string to the JSON format expected by the DB.
+
+    The LLM produces simple strings (e.g. ``"85"``, ``"-3"``, ``"Sword"``).
+    The load phase expects JSON objects (e.g. ``{"scene_number": 85}``).
+
+    Args:
+        effect_type: The effect type (e.g. ``"scene_redirect"``).
+        raw_value: The raw string value from the LLM or manual extraction.
+
+    Returns:
+        A JSON-encoded string suitable for the ``effect_value`` DB column.
+    """
+    import json as _json  # noqa: PLC0415
+
+    raw = raw_value.strip() if raw_value else ""
+
+    if effect_type == "scene_redirect" and raw:
+        try:
+            return _json.dumps({"scene_number": int(raw)})
+        except (ValueError, TypeError):
+            return raw
+
+    if effect_type in ("endurance_change", "gold_change", "meal_change") and raw:
+        try:
+            return _json.dumps({"amount": int(raw)})
+        except (ValueError, TypeError):
+            return raw
+
+    if effect_type in ("item_gain", "item_loss") and raw:
+        return _json.dumps({"item_name": raw})
+
+    return raw
+
+
 def _collect_random_outcomes(scene_dicts: list[dict]) -> list[dict]:
     """Flatten per-scene random outcomes from the _random_outcomes key."""
     outcome_dicts: list[dict] = []
     for scene in scene_dicts:
         for ordinal, outcome in enumerate(scene.get("_random_outcomes", [])):
+            etype = outcome["effect_type"]
+            raw_val = str(outcome.get("effect_value", ""))
             outcome_dict: dict = {
                 "scene_number": scene["number"],
                 "roll_group": 0,
                 "range_min": outcome["range_min"],
                 "range_max": outcome["range_max"],
-                "effect_type": outcome["effect_type"],
-                "effect_value": str(outcome.get("effect_value", "")),
+                "effect_type": etype,
+                "effect_value": _format_effect_value(etype, raw_val),
                 "narrative_text": outcome.get("narrative_text"),
                 "ordinal": ordinal,
                 "source": "auto",
@@ -234,7 +271,7 @@ def _enrich_with_llm(
     skip_choice_rewrite: bool,
     no_cache: bool,
     client: object | None,
-) -> tuple[list[dict], list[dict], list[dict], list[dict], list[dict], list[dict], int, list[str]]:
+) -> "EnrichmentResult":
     """Run LLM rewrite + scene analysis over all scenes, merging with manual results.
 
     When ``skip_llm`` is True, ALL LLM calls are skipped.
@@ -243,9 +280,7 @@ def _enrich_with_llm(
     This allows ``entities_only`` mode to work correctly.
 
     Returns:
-        (updated_choice_dicts, entity_game_objects, entity_refs,
-         merged_encounter_dicts, merged_item_dicts, merged_random_outcome_dicts,
-         llm_call_count, warnings)
+        An :class:`~app.parser.types.EnrichmentResult` with all merged data.
     """
     from app.parser.llm import (
         analyze_scene,
@@ -428,12 +463,12 @@ def _enrich_with_llm(
             enc_dict: dict = {
                 "scene_number": sn,
                 "enemy_name": enc.get("enemy_name", ""),
-                "enemy_cs": enc.get("enemy_cs", enc.get("combat_skill", 0)),
-                "enemy_end": enc.get("enemy_end", enc.get("endurance", 0)),
+                "enemy_cs": enc.get("enemy_cs", 0),
+                "enemy_end": enc.get("enemy_end", 0),
                 "ordinal": enc.get("ordinal", 1),
-                "mindblast_immune": m_flags.get("mindblast_immune", False),
-                "condition_type": None,
-                "condition_value": None,
+                "mindblast_immune": enc.get("mindblast_immune", m_flags.get("mindblast_immune", False)),
+                "condition_type": enc.get("condition_type"),
+                "condition_value": enc.get("condition_value"),
                 "source": "auto",
                 "modifiers": [
                     {
@@ -474,13 +509,15 @@ def _enrich_with_llm(
         m_outcomes, w = merge_random_outcomes(manual_outcomes, llm_outcomes, sn)
         warnings.extend(w)
         for ordinal, outcome in enumerate(m_outcomes):
+            etype = outcome.get("effect_type", "")
+            raw_val = str(outcome.get("effect_value", ""))
             merged_outcomes.append({
                 "scene_number": sn,
                 "roll_group": outcome.get("roll_group", 0),
                 "range_min": outcome.get("range_min", 0),
                 "range_max": outcome.get("range_max", 9),
-                "effect_type": outcome.get("effect_type", ""),
-                "effect_value": str(outcome.get("effect_value", "")),
+                "effect_type": etype,
+                "effect_value": _format_effect_value(etype, raw_val),
                 "narrative_text": outcome.get("narrative_text"),
                 "ordinal": ordinal,
                 "source": "auto",
@@ -492,10 +529,17 @@ def _enrich_with_llm(
             _, w = merge_conditions(scene_choices, llm_conditions, sn)
             warnings.extend(w)
 
-    return (
-        choice_dicts, entity_game_objects, entity_refs,
-        merged_encounters, merged_items, merged_outcomes,
-        llm_call_count, warnings,
+    from app.parser.types import EnrichmentResult  # noqa: PLC0415
+
+    return EnrichmentResult(
+        choice_dicts=choice_dicts,
+        entity_game_objects=entity_game_objects,
+        entity_refs=entity_refs,
+        encounter_dicts=merged_encounters,
+        item_dicts=merged_items,
+        random_outcome_dicts=merged_outcomes,
+        llm_call_count=llm_call_count,
+        warnings=warnings,
     )
 
 
@@ -642,16 +686,7 @@ def run_pipeline(
     llm_call_count = 0
 
     if not entities_only:
-        (
-            choice_dicts,
-            entity_game_objects,
-            entity_refs,
-            encounter_dicts,
-            item_dicts,
-            random_outcome_dicts,
-            llm_call_count,
-            llm_warnings,
-        ) = _enrich_with_llm(
+        enrich_result = _enrich_with_llm(
             scenes=scenes,
             choice_dicts=choice_dicts,
             scene_dicts=scene_dicts,
@@ -665,19 +700,17 @@ def run_pipeline(
             no_cache=no_cache,
             client=llm_client,
         )
-        warnings.extend(llm_warnings)
+        choice_dicts = enrich_result.choice_dicts
+        entity_game_objects = enrich_result.entity_game_objects
+        entity_refs = enrich_result.entity_refs
+        encounter_dicts = enrich_result.encounter_dicts
+        item_dicts = enrich_result.item_dicts
+        random_outcome_dicts = enrich_result.random_outcome_dicts
+        llm_call_count = enrich_result.llm_call_count
+        warnings.extend(enrich_result.warnings)
     else:
         # entities_only: run scene analysis but skip choice rewriting
-        (
-            _,
-            entity_game_objects,
-            entity_refs,
-            encounter_dicts,
-            item_dicts,
-            random_outcome_dicts,
-            _,
-            llm_warnings,
-        ) = _enrich_with_llm(
+        enrich_result = _enrich_with_llm(
             scenes=scenes,
             choice_dicts=choice_dicts,
             scene_dicts=scene_dicts,
@@ -691,7 +724,12 @@ def run_pipeline(
             no_cache=no_cache,
             client=llm_client,
         )
-        warnings.extend(llm_warnings)
+        entity_game_objects = enrich_result.entity_game_objects
+        entity_refs = enrich_result.entity_refs
+        encounter_dicts = enrich_result.encounter_dicts
+        item_dicts = enrich_result.item_dicts
+        random_outcome_dicts = enrich_result.random_outcome_dicts
+        warnings.extend(enrich_result.warnings)
 
     # Combine entity game objects with any additional types
     all_game_objects: list[dict] = entity_game_objects

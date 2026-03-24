@@ -313,3 +313,43 @@ class TestMainFunction:
         assert opts["dry_run"] is True
         assert opts["skip_llm"] is True
         assert opts["no_cache"] is True
+
+
+# ---------------------------------------------------------------------------
+# --merge-report output behavior
+# ---------------------------------------------------------------------------
+
+
+class TestMergeReport:
+    def _parse(self, args: list[str]) -> object:
+        return build_parser().parse_args(args)
+
+    def test_merge_report_flag_parsed(self) -> None:
+        ns = self._parse(["--source-dir", "/tmp", "--merge-report"])
+        assert ns.merge_report is True
+
+    def test_merge_report_option_passed_to_pipeline(self, tmp_path: Path) -> None:
+        xhtml_file = tmp_path / "01fftd.xhtml"
+        xhtml_file.write_text("<html><title>Test</title></html>", encoding="utf-8")
+
+        mock_result = MagicMock()
+        mock_result.book_data = MagicMock()
+        mock_result.counts = {}
+        mock_result.warnings = []
+
+        captured_options: list[dict] = []
+
+        def capture_pipeline(path: str, options: dict) -> object:
+            captured_options.append(dict(options))
+            return mock_result
+
+        with patch("seed_db.run_pipeline", side_effect=capture_pipeline):
+            main([
+                "--source-dir", str(tmp_path),
+                "--book", "1",
+                "--dry-run",
+                "--merge-report",
+            ])
+
+        assert len(captured_options) == 1
+        assert captured_options[0]["merge_report"] is True
