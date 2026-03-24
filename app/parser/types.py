@@ -78,3 +78,22 @@ class EquipmentData:
     item_name: str
     item_type: str
     quantity: int
+
+
+@dataclass
+class SceneAnalysisData:
+    """Structured extraction results from LLM scene analysis.
+
+    Combines entity extraction, relationship inference, and game mechanics
+    detection into a single LLM call result.
+    """
+
+    entities: list[dict] = field(default_factory=list)
+    relationships: list[dict] = field(default_factory=list)
+    combat_encounters: list[dict] = field(default_factory=list)
+    items: list[dict] = field(default_factory=list)
+    random_outcomes: list[dict] = field(default_factory=list)
+    evasion: dict | None = None
+    combat_modifiers: list[dict] = field(default_factory=list)
+    conditions: list[dict] = field(default_factory=list)
+    scene_flags: dict = field(default_factory=dict)

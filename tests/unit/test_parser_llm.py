@@ -16,11 +16,15 @@ import pytest
 from app.parser.llm import (
     _cache_key,
     _get_cached,
+    _parse_json_llm,
+    _scene_analysis_cache_key,
     _set_cached,
+    _validate_scene_analysis,
+    analyze_scene,
     rewrite_choice,
     rewrite_choices_batch,
 )
-from app.parser.types import ChoiceData
+from app.parser.types import ChoiceData, SceneAnalysisData
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -363,3 +367,315 @@ class TestRewriteChoicesBatch:
         rewrite_choices_batch(choices, NARRATIVE, client=client, no_cache=True)
         rewrite_choices_batch(choices, NARRATIVE, client=client, no_cache=True)
         assert client.messages.create.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Scene analysis — cache key
+# ---------------------------------------------------------------------------
+
+COMBAT_NARRATIVE = (
+    "A Kraan swoops down from the sky. You must fight it.\n"
+    "Kraan: COMBAT SKILL 16   ENDURANCE 24\n"
+    "You may evade combat after 3 rounds by turning to 85."
+)
+
+SCENE_ANALYSIS_JSON = json.dumps({
+    "entities": [
+        {"kind": "creature", "name": "Kraan", "description": "A flying reptilian creature", "aliases": []},
+    ],
+    "relationships": [],
+    "combat_encounters": [
+        {"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1},
+    ],
+    "items": [],
+    "random_outcomes": [],
+    "evasion": {"rounds": 3, "target_scene": 85, "damage": 0},
+    "combat_modifiers": [],
+    "conditions": [],
+    "scene_flags": {
+        "must_eat": False, "loses_backpack": False,
+        "is_death": False, "is_victory": False, "mindblast_immune": False,
+    },
+})
+
+
+class TestSceneAnalysisCacheKey:
+    def test_is_deterministic(self) -> None:
+        k1 = _scene_analysis_cache_key("narrative", 1, 42)
+        k2 = _scene_analysis_cache_key("narrative", 1, 42)
+        assert k1 == k2
+
+    def test_different_scene_different_key(self) -> None:
+        k1 = _scene_analysis_cache_key("narrative", 1, 42)
+        k2 = _scene_analysis_cache_key("narrative", 1, 43)
+        assert k1 != k2
+
+    def test_different_book_different_key(self) -> None:
+        k1 = _scene_analysis_cache_key("narrative", 1, 42)
+        k2 = _scene_analysis_cache_key("narrative", 2, 42)
+        assert k1 != k2
+
+    def test_returns_64_char_hex(self) -> None:
+        key = _scene_analysis_cache_key("narrative", 1, 1)
+        assert len(key) == 64
+        assert all(c in "0123456789abcdef" for c in key)
+
+
+# ---------------------------------------------------------------------------
+# Scene analysis — validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSceneAnalysis:
+    def test_returns_none_for_non_dict(self) -> None:
+        assert _validate_scene_analysis([]) is None
+        assert _validate_scene_analysis("string") is None
+        assert _validate_scene_analysis(None) is None
+
+    def test_empty_dict_returns_defaults(self) -> None:
+        result = _validate_scene_analysis({})
+        assert result is not None
+        assert result["entities"] == []
+        assert result["combat_encounters"] == []
+        assert result["items"] == []
+        assert result["evasion"] is None
+        assert result["scene_flags"]["must_eat"] is False
+
+    def test_validates_combat_encounters(self) -> None:
+        raw = {
+            "combat_encounters": [
+                {"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1},
+                {"enemy_name": "", "combat_skill": 10, "endurance": 12},  # empty name — filtered
+                {"enemy_name": "Giak", "combat_skill": "bad", "endurance": 12},  # bad CS — filtered
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["combat_encounters"]) == 1
+        assert result["combat_encounters"][0]["enemy_name"] == "Kraan"
+
+    def test_validates_items(self) -> None:
+        raw = {
+            "items": [
+                {"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"},
+                {"item_name": "Junk", "item_type": "invalid_type", "quantity": 1, "action": "gain"},
+                {"item_name": "Gold", "item_type": "gold", "quantity": 5, "action": "invalid"},
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["items"]) == 1
+        assert result["items"][0]["item_name"] == "Sword"
+
+    def test_validates_evasion(self) -> None:
+        raw = {"evasion": {"rounds": 3, "target_scene": 85, "damage": 2}}
+        result = _validate_scene_analysis(raw)
+        assert result["evasion"] == {"rounds": 3, "target_scene": 85, "damage": 2}
+
+    def test_evasion_null(self) -> None:
+        raw = {"evasion": None}
+        result = _validate_scene_analysis(raw)
+        assert result["evasion"] is None
+
+    def test_evasion_missing_required_fields(self) -> None:
+        raw = {"evasion": {"rounds": 3}}  # missing target_scene
+        result = _validate_scene_analysis(raw)
+        assert result["evasion"] is None
+
+    def test_validates_conditions_with_or(self) -> None:
+        raw = {
+            "conditions": [
+                {
+                    "choice_ordinal": 1,
+                    "condition_type": "discipline",
+                    "condition_value": {"any": ["Tracking", "Huntmastery"]},
+                },
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["conditions"]) == 1
+        # Dict value should be JSON-encoded
+        assert '"any"' in result["conditions"][0]["condition_value"]
+
+    def test_validates_scene_flags(self) -> None:
+        raw = {"scene_flags": {"must_eat": True, "is_death": True}}
+        result = _validate_scene_analysis(raw)
+        assert result["scene_flags"]["must_eat"] is True
+        assert result["scene_flags"]["is_death"] is True
+        assert result["scene_flags"]["loses_backpack"] is False  # default
+
+    def test_validates_combat_modifiers(self) -> None:
+        raw = {
+            "combat_modifiers": [
+                {"modifier_type": "undead", "value": None},
+                {"modifier_type": "cs_bonus", "value": 2},
+                {"modifier_type": "invalid_type", "value": 1},  # filtered
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["combat_modifiers"]) == 2
+
+    def test_validates_random_outcomes(self) -> None:
+        raw = {
+            "random_outcomes": [
+                {"range_min": 0, "range_max": 4, "effect_type": "endurance_change", "effect_value": -2},
+                {"range_min": 5, "range_max": 9, "effect_type": "invalid_effect"},  # filtered
+            ],
+        }
+        result = _validate_scene_analysis(raw)
+        assert len(result["random_outcomes"]) == 1
+        assert result["random_outcomes"][0]["effect_value"] == "-2"  # converted to str
+
+
+# ---------------------------------------------------------------------------
+# Scene analysis — analyze_scene function
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeScene:
+    def test_skip_llm_returns_none(self, tmp_cache: Path) -> None:
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog={}, skip_llm=True,
+        )
+        assert result is None
+
+    def test_empty_narrative_returns_none(self, tmp_cache: Path) -> None:
+        result = analyze_scene(
+            "", [], book_id=1, scene_number=1,
+            existing_catalog={}, client=_make_mock_client(SCENE_ANALYSIS_JSON),
+        )
+        assert result is None
+
+    def test_whitespace_only_narrative_returns_none(self, tmp_cache: Path) -> None:
+        result = analyze_scene(
+            "   \n  ", [], book_id=1, scene_number=1,
+            existing_catalog={}, client=_make_mock_client(SCENE_ANALYSIS_JSON),
+        )
+        assert result is None
+
+    def test_returns_scene_analysis_data(self, tmp_cache: Path) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        result = analyze_scene(
+            COMBAT_NARRATIVE, ["If you wish to fight, turn to 100."],
+            book_id=1, scene_number=42, existing_catalog={},
+            client=client, no_cache=True,
+        )
+        assert isinstance(result, SceneAnalysisData)
+        assert len(result.combat_encounters) == 1
+        assert result.combat_encounters[0]["enemy_name"] == "Kraan"
+        assert result.evasion == {"rounds": 3, "target_scene": 85, "damage": 0}
+        assert len(result.entities) == 1
+
+    def test_calls_llm_with_system_and_user_messages(self, tmp_cache: Path) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        analyze_scene(
+            COMBAT_NARRATIVE, ["Choice 1"],
+            book_id=1, scene_number=5, existing_catalog={},
+            client=client, no_cache=True,
+        )
+        call_kwargs = client.messages.create.call_args.kwargs
+        assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
+        assert call_kwargs["max_tokens"] == 2048
+        assert "system" in call_kwargs
+        assert "combat_encounters" in call_kwargs["system"]
+        user_content = call_kwargs["messages"][0]["content"]
+        assert "Scene 5" in user_content
+        assert "Choice 1" in user_content
+
+    def test_narrative_in_prompt(self, tmp_cache: Path) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        user_content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "Kraan" in user_content
+
+    def test_choices_included_in_prompt(self) -> None:
+        """Choices text should appear in the user message."""
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        analyze_scene(
+            COMBAT_NARRATIVE,
+            ["If you have Tracking, turn to 50.", "Go north, turn to 100."],
+            book_id=1, scene_number=1, existing_catalog={},
+            client=client, no_cache=True,
+        )
+        user_content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "Tracking" in user_content
+        assert "1." in user_content
+        assert "2." in user_content
+
+    def test_no_choices_placeholder(self) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        user_content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "death or victory" in user_content
+
+    def test_cache_hit_skips_llm(self, tmp_cache: Path) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        # First call populates cache
+        analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=42,
+            existing_catalog={}, client=client,
+        )
+        client.messages.create.reset_mock()
+        # Second call should hit cache
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=42,
+            existing_catalog={}, client=client,
+        )
+        client.messages.create.assert_not_called()
+        assert isinstance(result, SceneAnalysisData)
+
+    def test_no_cache_always_calls_llm(self, tmp_cache: Path) -> None:
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=42,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=42,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        assert client.messages.create.call_count == 2
+
+    def test_malformed_json_returns_none(self, tmp_cache: Path) -> None:
+        client = _make_mock_client("this is not json at all")
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        assert result is None
+
+    def test_api_error_returns_none(self, tmp_cache: Path) -> None:
+        client = MagicMock()
+        client.messages.create.side_effect = RuntimeError("API error")
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        assert result is None
+
+    def test_entities_filtered_by_catalog(self, tmp_cache: Path) -> None:
+        """Entities already in the catalog should be excluded."""
+        client = _make_mock_client(SCENE_ANALYSIS_JSON)
+        catalog = {"kraan": {"kind": "creature", "name": "Kraan"}}
+        result = analyze_scene(
+            COMBAT_NARRATIVE, [], book_id=1, scene_number=1,
+            existing_catalog=catalog, client=client, no_cache=True,
+        )
+        assert result is not None
+        assert len(result.entities) == 0  # Kraan filtered out
+
+    def test_scene_flags_all_false_by_default(self, tmp_cache: Path) -> None:
+        minimal_json = json.dumps({"scene_flags": {}})
+        client = _make_mock_client(minimal_json)
+        result = analyze_scene(
+            "A simple scene.", [], book_id=1, scene_number=1,
+            existing_catalog={}, client=client, no_cache=True,
+        )
+        assert result is not None
+        assert result.scene_flags["must_eat"] is False
+        assert result.scene_flags["is_death"] is False

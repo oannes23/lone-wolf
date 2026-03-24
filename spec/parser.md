@@ -273,127 +273,45 @@ def parse_combat(combat_element):
 
 ### LLM Enrichment Phase (Haiku)
 
-The parser uses Claude Haiku for enrichment tasks. All require Anthropic API credentials.
+The parser uses Claude Haiku for enrichment tasks. All require Anthropic API credentials (`ANTHROPIC_API_KEY`). All LLM calls are synchronous.
 
 #### LLM Result Caching
 
 - **Decision**: Cache LLM results locally to avoid redundant API calls on re-runs.
-- **Implementation**: Hash the input text (SHA-256), store the LLM response in a local cache at `.parser_cache/`. Keyed by `(input_hash, task_type)`. Cache is local-only, not committed to the repo. Can be cleared with `--no-cache` flag.
+- **Implementation**: Hash the input text (SHA-256), store the LLM response in a local cache at `.parser_cache/`. Cache is local-only, not committed to the repo. Can be bypassed with `--no-cache` flag. Each cache entry records the prompt, response, timestamp (ISO-8601 UTC), and model identifier.
 
 #### Choice Rewriting
 
-Choice text is rewritten to be **page-agnostic**.
+Choice text is rewritten to be **page-agnostic** via `app.parser.llm.rewrite_choice()`.
 
-```python
-async def rewrite_choice_text(raw_text: str) -> str:
-    """
-    Rewrite a single choice text to remove page references and book phrasing.
+Both `raw_text` (original) and `display_text` (rewritten) are stored. The API serves `display_text`. On any LLM failure, `raw_text` is used as the fallback.
 
-    Examples:
-      "If you wish to use your Kai Discipline of Sixth Sense, turn to 141."
-        → "Use your Sixth Sense to investigate"
-      "If you wish to take the right path into the wood, turn to 85."
-        → "Take the right path into the wood"
-      "Turn to 139."
-        → "Continue"
-    """
-    response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=200,
-        messages=[{
-            "role": "user",
-            "content": f"Rewrite this game book choice text to remove page references "
-                       f"and 'If you wish to' preamble. Make it a direct, concise action. "
-                       f"Return ONLY the rewritten text, nothing else.\n\n"
-                       f"Original: {raw_text}"
-        }]
-    )
-    return response.content[0].text.strip()
-```
+Examples:
+- "If you wish to use your Kai Discipline of Sixth Sense, turn to 141." → "Use your Sixth Sense to investigate"
+- "If you wish to take the right path into the wood, turn to 85." → "Take the right path into the wood"
+- "Turn to 139." → "Continue"
 
-Both `raw_text` (original) and `display_text` (rewritten) are stored. The API serves `display_text`.
+#### Unified Scene Analysis (→ entities, game_object_refs, + structured game data)
 
-#### Entity Extraction (→ game_objects + game_object_refs)
+The primary LLM enrichment step is `app.parser.llm.analyze_scene()`, which issues a single structured-extraction prompt per scene and returns a `SceneAnalysisData` dataclass covering:
 
-Extracts game objects (characters, locations, creatures, organizations) from each scene's narrative text. Entities are **global** — the LLM is given the current game object catalog and deduplicates against it.
+- **entities** — named characters, locations, creatures, organizations (kinds)
+- **relationships** — tagged refs between entities
+- **combat_encounters** — enemy name, COMBAT SKILL, ENDURANCE, ordinal
+- **items** — item name, type, quantity, gain/lose action
+- **random_outcomes** — outcome bands (range_min/max, effect_type, effect_value)
+- **evasion** — rounds, target_scene, evasion_damage
+- **combat_modifiers** — modifier_type and numeric value
+- **conditions** — per-choice gate conditions (discipline, item, gold, random)
+- **scene_flags** — must_eat, loses_backpack, is_death, is_victory, mindblast_immune
 
-```python
-async def extract_entities(
-    narrative_text: str,
-    book_slug: str,
-    scene_number: int,
-    existing_game_objects: list[dict],  # current catalog for dedup
-) -> dict:
-    """
-    Extract game objects from a scene's narrative.
+The LLM is given a structured system prompt with an explicit JSON schema and validation rules. All output is validated by `_validate_scene_analysis()` before use. Individual invalid entries are silently dropped; a partially valid response still yields useful output.
 
-    Returns structured JSON:
-    {
-      "entities": [
-        {
-          "name": "Dorier",
-          "kind": "character",
-          "description": "A Sommlending merchant encountered on the road",
-          "aliases": [],
-          "existing_game_object_id": null,
-          "properties": {"title": "merchant", "race": "Sommlending"},
-          "role": "quest_giver",
-          "context": "Dorier offers to sell you provisions for your journey"
-        }
-      ],
-      "relationships": [
-        {
-          "source_name": "Dorier",
-          "target_name": "Sommerlund",
-          "tags": ["spatial", "originates_from"],
-          "metadata": null
-        }
-      ]
-    }
-    """
-    entity_names = [e["name"] for e in existing_game_objects]
-    response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2000,
-        messages=[{
-            "role": "user",
-            "content": (
-                "Extract all named characters, locations, creatures, and organizations "
-                "from this game book scene narrative. For each entity, provide:\n"
-                "- name (canonical form)\n"
-                "- kind: character, location, creature, or organization\n"
-                "- description: brief summary\n"
-                "- aliases: alternate names used in text\n"
-                "- role: how the entity appears in this scene "
-                "(combatant, quest_giver, ally, mentioned, visited, origin, obstacle, etc.)\n"
-                "- context: one sentence describing what the entity does in this scene\n"
-                "- properties: kind-specific metadata as JSON\n\n"
-                "Also extract relationships between entities as tagged refs with:\n"
-                "- source_name, target_name\n"
-                "- tags: array with category + type (e.g., ['spatial', 'located_in'], ['factional', 'member_of'])\n\n"
-                "IMPORTANT: Check if any extracted entity matches an existing game object "
-                f"(by name or alias). Known entities: {entity_names}\n"
-                "If a match is found, use the existing name rather than creating a duplicate.\n\n"
-                "Return valid JSON only.\n\n"
-                f"Scene {scene_number} from book {book_slug}:\n{narrative_text}"
-            )
-        }]
-    )
-    return json.loads(response.content[0].text)
-```
+**Entity deduplication**: An in-memory entity catalog accumulates across the book. Entities already in the catalog (case-insensitive name match) are excluded from the `SceneAnalysisData.entities` list. The catalog grows scene by scene so later scenes avoid duplicating entities seen in earlier ones.
 
-**Deduplication strategy**: The LLM receives the current game object name list with each call. For very large catalogs, the list can be filtered to objects of the same kind or from the same book/era.
+**Processing order**: Books are processed in order (1→5 for MVP) so the entity catalog builds incrementally within each book.
 
-**Processing order**: Books are processed in order (1→29) so that entities from earlier books are in the catalog when later books reference them.
-
-**Game object creation for items and foes**: In addition to LLM-extracted entities, the parser creates game_objects for:
-- **Foes** (kind='foe'): Each unique enemy name becomes a game_object. Properties include base_cs, base_end. The `combat_encounters` row references via `foe_game_object_id`.
-- **Items** (kind='item'): Each unique item name becomes a game_object. Properties include item_type, category. The `scene_items` row references via `game_object_id`.
-- **Scenes** (kind='scene'): Each scene gets a game_object entry. The `scenes` row references via `game_object_id`.
-
-#### Relationship Inference (→ game_object_refs)
-
-Relationships are extracted alongside entity extraction. The LLM identifies relationships and outputs them as tagged refs:
+**Relationship tags** follow the project tagged ref conventions:
 
 | Tag Category | When to use |
 |-------------|-------------|
@@ -404,7 +322,23 @@ Relationships are extracted alongside entity extraction. The LLM identifies rela
 | `temporal` | Time-based: `["temporal", "preceded_by"]`, `["temporal", "created"]` |
 | `causal` | Cause/effect: `["causal", "caused"]`, `["causal", "prevented"]` |
 
-Relationships are additive — new refs discovered in later scenes/books are added without removing earlier ones.
+Relationships are additive — new refs discovered in later scenes are added without removing earlier ones. Refs where either entity is not in the catalog generate a warning and are skipped.
+
+#### Manual + LLM Merge Layer
+
+After scene analysis, `app.parser.merge` reconciles LLM structured extraction with manual transform results. Each data type has its own merge function and arbitration rule:
+
+| Data type | Arbitration |
+|-----------|-------------|
+| `combat_encounters` | LLM wins if it returns any; manual-only entries also included (with warning) |
+| `items` | Union of both sources, deduplicated by (item_name, action); LLM preferred |
+| `random_outcomes` | LLM wins if it returns any bands; count mismatch warned |
+| `evasion` | LLM wins if it returns evasion data; disagreement warned |
+| `combat_modifiers` | Union, deduplicated by modifier_type; LLM preferred |
+| `conditions` | LLM wins per-choice; manual used as fallback when LLM has no condition for a choice |
+| `scene_flags` | Manual True always wins; LLM catches cases where manual is False |
+
+When `--skip-llm` is used, all merge functions pass through manual results unchanged with no warnings. The merge layer produces `MERGE_CONFLICT` warning strings that can be written to a JSON report with `--merge-report`.
 
 ### Load Phase
 
@@ -449,33 +383,38 @@ Tables with `source` column: `scenes`, `choices`, `combat_encounters`, `combat_m
 
 ## CLI Interface
 
-```bash
-# Parse and load all Lone Wolf books
-uv run python scripts/seed_db.py
+All examples assume `--source-dir` points to the directory containing Project Aon XHTML files.
 
-# Parse a single book
-uv run python scripts/seed_db.py --book 01fftd
+```bash
+# Parse and load all Lone Wolf books (with LLM enrichment)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books
+
+# Parse a single book (--book takes the book number, not a slug)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --book 1
 
 # Parse with verbose logging
-uv run python scripts/seed_db.py --verbose
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --verbose
 
 # Validate only (no database writes)
-uv run python scripts/seed_db.py --dry-run
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --dry-run
 
 # Reset and reload (clears all auto-sourced data, preserves manual)
-uv run python scripts/seed_db.py --reset
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --reset
 
-# Skip LLM enrichment (no choice rewriting or entity extraction)
-uv run python scripts/seed_db.py --skip-llm
+# Skip all LLM calls (no choice rewriting or scene analysis)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --skip-llm
 
-# Skip only entity extraction (still rewrite choices)
-uv run python scripts/seed_db.py --skip-entities
+# Skip entity/scene analysis only (choice rewriting still runs)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --skip-entities
 
-# Extract entities only (skip choice rewriting, useful for re-running entity pass)
-uv run python scripts/seed_db.py --entities-only
+# Run only entity/scene analysis (skip choice rewriting)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --entities-only
 
 # Bypass LLM cache (force fresh API calls)
-uv run python scripts/seed_db.py --no-cache
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --no-cache
+
+# Write merge conflict reports (merge_report_{slug}.json per book)
+uv run python scripts/seed_db.py --source-dir /path/to/aon/books --merge-report
 ```
 
 The script:

@@ -1,9 +1,29 @@
 """Parse Project Aon XHTML files and load content into the database.
 
 Usage:
+    # Parse and load all books (with LLM enrichment)
+    uv run python scripts/seed_db.py --source-dir /path/to/aon/books
+
+    # Parse a single book with verbose output
     uv run python scripts/seed_db.py --source-dir /path/to/aon/books --book 1 --verbose
+
+    # Dry run (extract + transform only, no DB writes)
     uv run python scripts/seed_db.py --source-dir /path/to/aon/books --dry-run
+
+    # Skip all LLM calls (use raw_text as display_text, no entity/scene analysis)
     uv run python scripts/seed_db.py --source-dir /path/to/aon/books --skip-llm
+
+    # Skip entity/scene analysis only (choice rewriting still runs)
+    uv run python scripts/seed_db.py --source-dir /path/to/aon/books --skip-entities
+
+    # Run only the entity/scene analysis pass (skip choice rewriting)
+    uv run python scripts/seed_db.py --source-dir /path/to/aon/books --entities-only
+
+    # Bypass LLM cache (force fresh API calls)
+    uv run python scripts/seed_db.py --source-dir /path/to/aon/books --no-cache
+
+    # Write a JSON file with manual vs LLM merge conflicts per book
+    uv run python scripts/seed_db.py --source-dir /path/to/aon/books --merge-report
 """
 
 from __future__ import annotations
@@ -104,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Bypass the LLM response cache for all calls.",
+    )
+    parser.add_argument(
+        "--merge-report",
+        action="store_true",
+        default=False,
+        help="Write a merge_report_{slug}.json file with manual vs LLM comparison per scene.",
     )
     return parser
 
@@ -206,12 +232,19 @@ def _print_book_report(book_title: str, book_number: int, result: object) -> Non
     print(f"  Disciplines:   {counts.get('disciplines', 0)}")
     print(f"  Game Objects:  {counts.get('game_objects', 0)}")
     print(f"  Refs:          {counts.get('refs', 0)}")
-    print(f"  LLM Rewrites:  {counts.get('llm_rewrites', 0)}")
+    print(f"  LLM Calls:     {counts.get('llm_calls', 0)}")
     print(f"  Warnings:      {len(result.warnings)}")
 
-    if result.warnings:
+    merge_conflicts = [w for w in result.warnings if w.startswith("MERGE_CONFLICT")]
+    other_warnings = [w for w in result.warnings if not w.startswith("MERGE_CONFLICT")]
+
+    if other_warnings:
         print("  Warning details:")
-        for w in result.warnings:
+        for w in other_warnings:
+            print(f"    - {w}")
+    if merge_conflicts:
+        print(f"  Merge conflicts: {len(merge_conflicts)}")
+        for w in merge_conflicts:
             print(f"    - {w}")
 
 
@@ -266,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "entities_only": args.entities_only,
         "no_cache": args.no_cache,
         "reset": args.reset,
+        "merge_report": args.merge_report,
     }
 
     if args.dry_run:
@@ -296,6 +330,31 @@ def main(argv: list[str] | None = None) -> int:
     # Print per-book summary reports
     for book_number, book_title, result in all_results:
         _print_book_report(book_title, book_number, result)
+
+    # Write merge reports if requested
+    if args.merge_report:
+        import json
+
+        for book_number, book_title, result in all_results:
+            from app.parser.pipeline import PipelineResult
+
+            if not isinstance(result, PipelineResult):
+                continue
+            merge_warnings = [w for w in result.warnings if w.startswith("MERGE_CONFLICT")]
+            if merge_warnings:
+                report_path = Path(f"merge_report_{result.book_data.slug}.json")
+                report_data = {
+                    "book": book_number,
+                    "title": book_title,
+                    "slug": result.book_data.slug,
+                    "merge_conflicts": merge_warnings,
+                    "conflict_count": len(merge_warnings),
+                }
+                report_path.write_text(
+                    json.dumps(report_data, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                print(f"  Merge report written to: {report_path}")
 
     total_books = len(all_results)
     print(f"\nTotal: {total_books} book{'s' if total_books != 1 else ''} processed")

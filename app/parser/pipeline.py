@@ -102,6 +102,7 @@ def _transform_scenes(scenes: list[SceneData]) -> tuple[list[dict], list[dict], 
             "loses_backpack": loses_backpack,
             "source": "auto",
             "_random_outcomes": random_outcomes,
+            "_mindblast_immune": mindblast_immune,
         }
         scene_dicts.append(scene_dict)
 
@@ -223,26 +224,45 @@ def _collect_random_outcomes(scene_dicts: list[dict]) -> list[dict]:
 def _enrich_with_llm(
     scenes: list[SceneData],
     choice_dicts: list[dict],
+    scene_dicts: list[dict],
+    encounter_dicts: list[dict],
+    item_dicts: list[dict],
+    random_outcome_dicts: list[dict],
     book_id: int,
     skip_llm: bool,
     skip_entities: bool,
+    skip_choice_rewrite: bool,
     no_cache: bool,
     client: object | None,
-) -> tuple[list[dict], list[dict], list[dict], list[dict], int, list[str]]:
-    """Run LLM rewrite + entity extraction over all scenes.
+) -> tuple[list[dict], list[dict], list[dict], list[dict], list[dict], list[dict], int, list[str]]:
+    """Run LLM rewrite + scene analysis over all scenes, merging with manual results.
+
+    When ``skip_llm`` is True, ALL LLM calls are skipped.
+    When ``skip_entities`` is True, only choice rewriting runs (no scene analysis).
+    When ``skip_choice_rewrite`` is True, only scene analysis runs (no choice rewriting).
+    This allows ``entities_only`` mode to work correctly.
 
     Returns:
         (updated_choice_dicts, entity_game_objects, entity_refs,
-         updated_choice_dicts (same reference), llm_rewrite_count, warnings)
+         merged_encounter_dicts, merged_item_dicts, merged_random_outcome_dicts,
+         llm_call_count, warnings)
     """
     from app.parser.llm import (
-        extract_entities,
-        infer_relationships,
+        analyze_scene,
         rewrite_choice,
+    )
+    from app.parser.merge import (
+        merge_combat_encounters,
+        merge_combat_modifiers,
+        merge_conditions,
+        merge_evasion,
+        merge_items,
+        merge_random_outcomes,
+        merge_scene_flags,
     )
 
     warnings: list[str] = []
-    llm_rewrite_count = 0
+    llm_call_count = 0
     entity_game_objects: list[dict] = []
     entity_refs: list[dict] = []
 
@@ -251,84 +271,232 @@ def _enrich_with_llm(
         (c["scene_number"], c["ordinal"]): c for c in choice_dicts
     }
 
-    # Per-scene entity catalog (name → entity) accumulated across the book
+    # Build per-scene indexes for manual extraction results
+    encounters_by_scene: dict[int, list[dict]] = {}
+    for enc in encounter_dicts:
+        encounters_by_scene.setdefault(enc["scene_number"], []).append(enc)
+
+    items_by_scene: dict[int, list[dict]] = {}
+    for item in item_dicts:
+        items_by_scene.setdefault(item["scene_number"], []).append(item)
+
+    outcomes_by_scene: dict[int, list[dict]] = {}
+    for outcome in random_outcome_dicts:
+        outcomes_by_scene.setdefault(outcome["scene_number"], []).append(outcome)
+
+    scene_dict_by_number: dict[int, dict] = {s["number"]: s for s in scene_dicts}
+
+    # Per-scene entity catalog accumulated across the book
     entity_catalog: dict[str, dict] = {}
 
+    # Collect merged results to replace the originals
+    merged_encounters: list[dict] = []
+    merged_items: list[dict] = []
+    merged_outcomes: list[dict] = []
+
     for scene in scenes:
-        # LLM choice rewrite
+        sn = scene.number
+
+        # LLM choice rewrite (skipped when skip_llm or skip_choice_rewrite)
+        skip_rewrite = skip_llm or skip_choice_rewrite
         for choice in scene.choices:
             display_text = rewrite_choice(
                 raw_text=choice.raw_text,
                 scene_narrative=scene.narrative,
                 client=client,
-                skip_llm=skip_llm,
+                skip_llm=skip_rewrite,
                 no_cache=no_cache,
             )
             key = (scene.number, choice.ordinal)
             if key in choice_lookup:
                 choice_lookup[key]["display_text"] = display_text
-            if not skip_llm:
-                llm_rewrite_count += 1
+            if not skip_rewrite:
+                llm_call_count += 1
 
-        # Entity extraction
-        if not skip_entities:
-            new_entities = extract_entities(
+        # Scene analysis (replaces entity extraction + relationship inference).
+        # Skipped when skip_entities=True OR skip_llm=True (no LLM calls at all).
+        # The skip_choice_rewrite flag does NOT suppress scene analysis — this
+        # allows entities_only mode to work correctly.
+        analysis = None
+        if not skip_entities and not skip_llm:
+            choices_raw = [c.raw_text for c in scene.choices]
+            analysis = analyze_scene(
                 narrative=scene.narrative,
+                choices_raw=choices_raw,
                 book_id=book_id,
+                scene_number=sn,
                 existing_catalog=entity_catalog,
                 client=client,
-                skip_entities=skip_entities,
+                skip_llm=False,
                 no_cache=no_cache,
             )
-            for ent in new_entities:
+            if analysis is not None:
+                llm_call_count += 1
+
+        # Process entities and relationships from analysis
+        if analysis is not None:
+            for ent in analysis.entities:
                 entity_catalog[ent["name"].lower()] = ent
-                entity_game_objects.append(
+                entity_game_objects.append({
+                    "kind": ent["kind"],
+                    "name": ent["name"],
+                    "description": ent.get("description", ""),
+                    "aliases": str(ent.get("aliases", [])),
+                    "properties": "{}",
+                    "source": "auto",
+                })
+
+            for rel in analysis.relationships:
+                src_name = rel["source_name"]
+                tgt_name = rel["target_name"]
+                src_ent = entity_catalog.get(src_name.lower())
+                tgt_ent = entity_catalog.get(tgt_name.lower())
+                if src_ent and tgt_ent:
+                    entity_refs.append({
+                        "source_kind": src_ent["kind"],
+                        "source_name": src_name,
+                        "target_kind": tgt_ent["kind"],
+                        "target_name": tgt_name,
+                        "tags": str(rel.get("tags", [])),
+                        "metadata_": None,
+                        "source": "auto",
+                    })
+                else:
+                    warnings.append(
+                        f"Relationship {src_name!r} → {tgt_name!r}: entity not in catalog"
+                    )
+
+        # --- Merge manual + LLM structured extraction ---
+        manual_encounters = encounters_by_scene.get(sn, [])
+        manual_items = items_by_scene.get(sn, [])
+        manual_outcomes = outcomes_by_scene.get(sn, [])
+        scene_dict = scene_dict_by_number.get(sn, {})
+
+        llm_encounters = analysis.combat_encounters if analysis else None
+        llm_items = analysis.items if analysis else None
+        llm_outcomes = analysis.random_outcomes if analysis else None
+        llm_evasion = analysis.evasion if analysis else None
+        llm_modifiers = analysis.combat_modifiers if analysis else None
+        llm_conditions = analysis.conditions if analysis else None
+        llm_flags = analysis.scene_flags if analysis else None
+
+        # Scene flags — merge first so mindblast_immune is available for encounters
+        manual_flags = {
+            "must_eat": scene_dict.get("must_eat", False),
+            "loses_backpack": scene_dict.get("loses_backpack", False),
+            "is_death": scene_dict.get("is_death", False),
+            "is_victory": scene_dict.get("is_victory", False),
+            "mindblast_immune": scene_dict.get("_mindblast_immune", False),
+        }
+        m_flags, w = merge_scene_flags(manual_flags, llm_flags, sn)
+        warnings.extend(w)
+        if scene_dict:
+            scene_dict["must_eat"] = m_flags.get("must_eat", False)
+            scene_dict["loses_backpack"] = m_flags.get("loses_backpack", False)
+            scene_dict["is_death"] = m_flags.get("is_death", False)
+            scene_dict["is_victory"] = m_flags.get("is_victory", False)
+
+        # Combat encounters
+        m_enc, w = merge_combat_encounters(manual_encounters, llm_encounters, sn)
+        warnings.extend(w)
+
+        # Evasion — extract manual evasion from encounter dicts
+        manual_evasion = None
+        for enc in manual_encounters:
+            if enc.get("evasion_after_rounds") is not None:
+                manual_evasion = (
+                    enc["evasion_after_rounds"],
+                    enc.get("evasion_target"),
+                    enc.get("evasion_damage", 0),
+                )
+                break
+
+        merged_evasion, w = merge_evasion(manual_evasion, llm_evasion, sn)
+        warnings.extend(w)
+
+        # Combat modifiers — extract manual modifiers from encounter dicts
+        manual_modifiers = []
+        for enc in manual_encounters:
+            for mod in enc.get("modifiers", []):
+                manual_modifiers.append(mod)
+
+        m_mods, w = merge_combat_modifiers(manual_modifiers, llm_modifiers, sn)
+        warnings.extend(w)
+
+        # Rebuild encounter dicts with merged data (uses merged mindblast_immune)
+        for enc in m_enc:
+            enc_dict: dict = {
+                "scene_number": sn,
+                "enemy_name": enc.get("enemy_name", ""),
+                "enemy_cs": enc.get("enemy_cs", enc.get("combat_skill", 0)),
+                "enemy_end": enc.get("enemy_end", enc.get("endurance", 0)),
+                "ordinal": enc.get("ordinal", 1),
+                "mindblast_immune": m_flags.get("mindblast_immune", False),
+                "condition_type": None,
+                "condition_value": None,
+                "source": "auto",
+                "modifiers": [
                     {
-                        "kind": ent["kind"],
-                        "name": ent["name"],
-                        "description": ent.get("description", ""),
-                        "aliases": str(ent.get("aliases", [])),
-                        "properties": "{}",
+                        "modifier_type": m.get("modifier_type", ""),
+                        "modifier_value": m.get("value", m.get("modifier_value")),
+                        "condition": None,
                         "source": "auto",
                     }
-                )
+                    for m in m_mods
+                ],
+            }
+            if merged_evasion is not None:
+                enc_dict["evasion_after_rounds"] = merged_evasion[0]
+                enc_dict["evasion_target"] = merged_evasion[1]
+                enc_dict["evasion_damage"] = merged_evasion[2]
+            else:
+                enc_dict["evasion_after_rounds"] = None
+                enc_dict["evasion_target"] = None
+                enc_dict["evasion_damage"] = 0
+            merged_encounters.append(enc_dict)
 
-            # Relationship inference when we have >= 2 entities
-            if len(new_entities) >= 2:
-                scene_context = {
-                    "scene_number": scene.number,
-                    "narrative": scene.narrative,
-                }
-                rels = infer_relationships(
-                    entities=new_entities,
-                    scene_context=scene_context,
-                    client=client,
-                    no_cache=no_cache,
-                )
-                for rel in rels:
-                    # We need source_kind/target_kind for the refs loader
-                    src_name = rel["source_name"]
-                    tgt_name = rel["target_name"]
-                    src_ent = entity_catalog.get(src_name.lower())
-                    tgt_ent = entity_catalog.get(tgt_name.lower())
-                    if src_ent and tgt_ent:
-                        entity_refs.append(
-                            {
-                                "source_kind": src_ent["kind"],
-                                "source_name": src_name,
-                                "target_kind": tgt_ent["kind"],
-                                "target_name": tgt_name,
-                                "tags": str(rel.get("tags", [])),
-                                "metadata_": None,
-                                "source": "auto",
-                            }
-                        )
-                    else:
-                        warnings.append(
-                            f"Relationship {src_name!r} → {tgt_name!r}: entity not in catalog"
-                        )
+        # Items
+        m_items, w = merge_items(manual_items, llm_items, sn)
+        warnings.extend(w)
+        for ordinal, item in enumerate(m_items):
+            merged_items.append({
+                "scene_number": sn,
+                "item_name": item.get("item_name", ""),
+                "item_type": item.get("item_type", "backpack"),
+                "quantity": item.get("quantity", 1),
+                "action": item.get("action", "gain"),
+                "is_mandatory": False,
+                "phase_ordinal": ordinal,
+                "source": "auto",
+            })
 
-    return choice_dicts, entity_game_objects, entity_refs, llm_rewrite_count, warnings
+        # Random outcomes
+        m_outcomes, w = merge_random_outcomes(manual_outcomes, llm_outcomes, sn)
+        warnings.extend(w)
+        for ordinal, outcome in enumerate(m_outcomes):
+            merged_outcomes.append({
+                "scene_number": sn,
+                "roll_group": outcome.get("roll_group", 0),
+                "range_min": outcome.get("range_min", 0),
+                "range_max": outcome.get("range_max", 9),
+                "effect_type": outcome.get("effect_type", ""),
+                "effect_value": str(outcome.get("effect_value", "")),
+                "narrative_text": outcome.get("narrative_text"),
+                "ordinal": ordinal,
+                "source": "auto",
+            })
+
+        # Conditions — merge into choice_dicts in-place
+        scene_choices = [c for c in choice_dicts if c["scene_number"] == sn]
+        if scene_choices:
+            _, w = merge_conditions(scene_choices, llm_conditions, sn)
+            warnings.extend(w)
+
+    return (
+        choice_dicts, entity_game_objects, entity_refs,
+        merged_encounters, merged_items, merged_outcomes,
+        llm_call_count, warnings,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -346,9 +514,13 @@ def run_pipeline(
     1. Extract book metadata, scenes, choices, combat, CRT, disciplines,
        starting equipment.
     2. Transform: classify conditions, detect must_eat/backpack_loss/death/
-       victory, detect combat modifiers, evasion, items.
-    3. LLM enrich (unless ``skip_llm`` is True): rewrite choice display_text,
-       extract entities.
+       victory, detect combat modifiers, evasion, items, random outcomes.
+    3. LLM enrich + merge (unless ``skip_llm`` is True): rewrite choice
+       display_text; run unified scene analysis (:func:`~app.parser.llm.analyze_scene`)
+       to extract entities, relationships, combat encounters, items, random
+       outcomes, evasion, combat modifiers, choice conditions, and scene flags;
+       then merge LLM results with manual transform results via
+       :mod:`app.parser.merge`.
     4. Load into database (unless ``dry_run`` is True).
     5. Copy illustrations.
 
@@ -368,6 +540,11 @@ def run_pipeline(
             - ``db_session``: Pre-created SQLAlchemy Session (for testing).
               If absent, a new session is created from ``SessionLocal``.
             - ``llm_client``: Pre-created Anthropic client (for testing).
+            - ``merge_report`` (bool): When True, the caller (``seed_db.py``)
+              writes a ``merge_report_{slug}.json`` summarising manual vs LLM
+              conflicts.  This key is not consumed by ``run_pipeline`` itself —
+              it is read by the ``seed_db`` CLI after the pipeline returns.
+              Default False.
 
     Returns:
         A :class:`PipelineResult` with the book data, row counts, and warnings.
@@ -458,43 +635,59 @@ def run_pipeline(
     ]
 
     # ------------------------------------------------------------------
-    # Stage 3: LLM enrich
+    # Stage 3: LLM enrich + merge with manual results
     # ------------------------------------------------------------------
     entity_game_objects: list[dict] = []
     entity_refs: list[dict] = []
-    llm_rewrite_count = 0
+    llm_call_count = 0
 
     if not entities_only:
         (
             choice_dicts,
             entity_game_objects,
             entity_refs,
-            llm_rewrite_count,
+            encounter_dicts,
+            item_dicts,
+            random_outcome_dicts,
+            llm_call_count,
             llm_warnings,
         ) = _enrich_with_llm(
             scenes=scenes,
             choice_dicts=choice_dicts,
+            scene_dicts=scene_dicts,
+            encounter_dicts=encounter_dicts,
+            item_dicts=item_dicts,
+            random_outcome_dicts=random_outcome_dicts,
             book_id=book_data.number,
             skip_llm=skip_llm,
             skip_entities=skip_entities,
+            skip_choice_rewrite=False,
             no_cache=no_cache,
             client=llm_client,
         )
         warnings.extend(llm_warnings)
     else:
-        # entities_only: only run entity extraction, skip choice rewriting
+        # entities_only: run scene analysis but skip choice rewriting
         (
             _,
             entity_game_objects,
             entity_refs,
+            encounter_dicts,
+            item_dicts,
+            random_outcome_dicts,
             _,
             llm_warnings,
         ) = _enrich_with_llm(
             scenes=scenes,
             choice_dicts=choice_dicts,
+            scene_dicts=scene_dicts,
+            encounter_dicts=encounter_dicts,
+            item_dicts=item_dicts,
+            random_outcome_dicts=random_outcome_dicts,
             book_id=book_data.number,
-            skip_llm=True,
+            skip_llm=False,
             skip_entities=False,
+            skip_choice_rewrite=True,
             no_cache=no_cache,
             client=llm_client,
         )
@@ -523,9 +716,10 @@ def run_pipeline(
             "source": "auto",
         }
 
-        # Clean _random_outcomes sentinel key from scene dicts before loading
+        # Clean internal sentinel keys from scene dicts before loading
+        _INTERNAL_KEYS = {"_random_outcomes", "_mindblast_immune"}
         clean_scene_dicts = [
-            {k: v for k, v in s.items() if k != "_random_outcomes"}
+            {k: v for k, v in s.items() if k not in _INTERNAL_KEYS}
             for s in scene_dicts
         ]
 
@@ -600,7 +794,7 @@ def run_pipeline(
         "crt_rows": len(crt_dicts),
         "game_objects": len(all_game_objects),
         "refs": len(all_refs),
-        "llm_rewrites": llm_rewrite_count,
+        "llm_calls": llm_call_count,
         "random_outcomes": len(random_outcome_dicts),
         "starting_equipment": len(equipment_dicts),
     }

@@ -4,8 +4,17 @@ Uses Claude Haiku to:
 - Rewrite raw choice text from CYOA books, removing page-number references
   ("turn to N") while preserving the player-facing action and decision wording.
   (Story 5.3)
-- Extract named entities from scene narrative text. (Story 5.4)
-- Infer tagged relationships between entities. (Story 5.4)
+- Perform unified structured scene analysis via :func:`analyze_scene`, which
+  combines entity extraction, relationship inference, and game mechanics
+  detection (combat encounters, items, random outcomes, evasion, combat
+  modifiers, choice conditions, and scene flags) into a single LLM call.
+  Results are validated and returned as a :class:`~app.parser.types.SceneAnalysisData`.
+- Extract named entities from scene narrative text individually via
+  :func:`extract_entities`. (Story 5.4 — superseded by analyze_scene for
+  full pipeline runs; retained for targeted entity-only passes.)
+- Infer tagged relationships between entities individually via
+  :func:`infer_relationships`. (Story 5.4 — superseded by analyze_scene for
+  full pipeline runs; retained for targeted use.)
 
 This module is standalone — it is never imported by the API at runtime.
 Results are cached to ``.parser_cache/`` to avoid redundant API calls.
@@ -548,6 +557,411 @@ def infer_relationships(
         return []
 
     return _filter_relationships(parsed_data)
+
+
+# ---------------------------------------------------------------------------
+# Scene analysis — unified structured extraction
+# ---------------------------------------------------------------------------
+
+_SCENE_ANALYSIS_VERSION = "v1"
+
+_SCENE_ANALYSIS_SYSTEM = """\
+You are analyzing a passage from a Lone Wolf choose-your-own-adventure gamebook.
+Extract ALL game mechanics from the passage and return ONLY valid JSON matching this schema.
+Do not include mechanics that are not clearly present in the text.
+
+Schema:
+{
+  "entities": [{"kind": "character|location|creature|organization", "name": "...", "description": "...", "aliases": []}],
+  "relationships": [{"source_name": "...", "target_name": "...", "tags": ["spatial", "located_in"]}],
+  "combat_encounters": [{"enemy_name": "...", "combat_skill": 16, "endurance": 24, "ordinal": 1}],
+  "items": [{"item_name": "...", "item_type": "weapon|backpack|special|gold|meal", "quantity": 1, "action": "gain|lose"}],
+  "random_outcomes": [{"range_min": 0, "range_max": 4, "effect_type": "endurance_change|gold_change|scene_redirect|item_gain|item_loss|meal_change", "effect_value": "...", "narrative_text": "..."}],
+  "evasion": {"rounds": 3, "target_scene": 85, "damage": 0},
+  "combat_modifiers": [{"modifier_type": "cs_bonus|cs_penalty|double_damage|undead|enemy_mindblast", "value": 2}],
+  "conditions": [{"choice_ordinal": 1, "condition_type": "discipline|item|gold|random", "condition_value": "Tracking"}],
+  "scene_flags": {"must_eat": false, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": false}
+}
+
+Rules:
+- combat_encounters: Only extract if explicit stats with COMBAT SKILL and ENDURANCE numbers appear.
+- items: Include Gold Crowns with exact quantities. Meals as item_type "meal". Named weapons/equipment as appropriate types.
+- item_type: "weapon" for swords/axes/daggers/etc, "backpack" for general items, "special" for unique quest items, "gold" for Gold Crowns, "meal" for meals/food/rations.
+- action: "gain" if the player receives/finds/takes the item, "lose" if taken away or lost.
+- random_outcomes: Only if the text describes a Random Number Table with numbered outcome bands (0-9 ranges).
+- effect_value: For scene_redirect use the target scene number as a string. For endurance/gold/meal changes use a signed integer string (e.g. "-3", "+2").
+- evasion: Only if explicit evasion/escape rules with a round threshold are stated. Set evasion to null if none.
+- combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage.
+- conditions: Extract gate conditions from the choice text (e.g. "If you have the Kai Discipline of Tracking"). For OR conditions use JSON: {"any": ["Tracking", "Huntmastery"]}.
+- entities: Only clearly named entities, not generic references like "the guard" or "a merchant".
+- scene_flags: Set each flag only if clearly indicated by the text. Default all to false.
+- Return empty arrays [] and null for absent fields. Do not invent mechanics not present in the text."""
+
+_SCENE_ANALYSIS_USER = """\
+Book {book_number}, Scene {scene_number}:
+
+{narrative}
+
+Choices:
+{choices_text}
+
+Return JSON:"""
+
+_VALID_ITEM_TYPES = frozenset({"weapon", "backpack", "special", "gold", "meal"})
+_VALID_ACTIONS = frozenset({"gain", "lose"})
+_VALID_EFFECT_TYPES = frozenset({
+    "endurance_change", "gold_change", "scene_redirect",
+    "item_gain", "item_loss", "meal_change",
+})
+_VALID_MODIFIER_TYPES = frozenset({
+    "cs_bonus", "cs_penalty", "double_damage", "undead", "enemy_mindblast",
+})
+_VALID_CONDITION_TYPES = frozenset({"discipline", "item", "gold", "random"})
+_VALID_FLAG_KEYS = frozenset({
+    "must_eat", "loses_backpack", "is_death", "is_victory", "mindblast_immune",
+})
+
+
+def _scene_analysis_cache_key(
+    narrative: str, book_id: int, scene_number: int,
+) -> str:
+    """Return a deterministic cache key for unified scene analysis.
+
+    The key encodes the schema version (``_SCENE_ANALYSIS_VERSION``), book,
+    scene, and the first 2000 characters of the narrative.  Changing the
+    version string invalidates all prior cache entries.
+
+    Args:
+        narrative: Scene narrative text (first 2000 chars are used).
+        book_id: Numeric book identifier.
+        scene_number: Scene number within the book.
+
+    Returns:
+        A 64-character lowercase hex string.
+    """
+    content = (
+        f"{_SCENE_ANALYSIS_VERSION}|book:{book_id}|scene:{scene_number}"
+        f"|scene_analysis|{narrative[:2000]}"
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _coerce_int(val: object) -> int | None:
+    """Coerce a value to int if possible (handles LLM returning 16.0 as float)."""
+    if isinstance(val, int) and not isinstance(val, bool):
+        return val
+    if isinstance(val, float) and val == int(val):
+        return int(val)
+    return None
+
+
+def _validate_scene_analysis(raw: object) -> dict | None:
+    """Validate and normalize a parsed scene analysis JSON object.
+
+    Each section is validated independently using the ``_VALID_*`` frozensets
+    defined in this module.  Invalid or malformed entries within a section are
+    silently dropped rather than failing the whole result — the function is
+    permissive about individual fields so that a partially valid LLM response
+    still yields useful output.
+
+    Validated sections (all present as keys on the returned dict):
+
+    - ``entities`` — kind/name validated; deduplication against the catalog is
+      done by the caller (:func:`analyze_scene`).
+    - ``relationships`` — source_name/target_name required.
+    - ``combat_encounters`` — enemy_name, combat_skill, endurance required and
+      typed.
+    - ``items`` — item_name, item_type, action validated against allowlists.
+    - ``random_outcomes`` — range_min/max integers, effect_type validated.
+    - ``evasion`` — rounds/target_scene integers required; ``None`` if absent
+      or malformed.
+    - ``combat_modifiers`` — modifier_type validated against allowlist.
+    - ``conditions`` — condition_type validated; choice_ordinal must be int.
+    - ``scene_flags`` — all five boolean flags normalized; missing flags default
+      to ``False``.
+
+    Args:
+        raw: Parsed Python object from :func:`_parse_json_llm`.
+
+    Returns:
+        A cleaned dict with all expected section keys, or ``None`` if *raw*
+        is not a dict.
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    result: dict = {}
+
+    # Entities — reuse existing filter
+    raw_entities = raw.get("entities", [])
+    if isinstance(raw_entities, list):
+        validated: list[dict] = []
+        for e in raw_entities:
+            if not isinstance(e, dict):
+                continue
+            name = e.get("name", "").strip()
+            kind = e.get("kind", "").lower()
+            if name and kind in _ENTITY_KINDS:
+                aliases = e.get("aliases", [])
+                if not isinstance(aliases, list):
+                    aliases = []
+                validated.append({
+                    "kind": kind, "name": name,
+                    "description": e.get("description", ""),
+                    "aliases": aliases,
+                })
+        result["entities"] = validated
+    else:
+        result["entities"] = []
+
+    # Relationships
+    raw_rels = raw.get("relationships", [])
+    if isinstance(raw_rels, list):
+        result["relationships"] = _filter_relationships(raw_rels)
+    else:
+        result["relationships"] = []
+
+    # Combat encounters
+    raw_combats = raw.get("combat_encounters", [])
+    validated_combats: list[dict] = []
+    if isinstance(raw_combats, list):
+        for c in raw_combats:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("enemy_name", "").strip()
+            cs = _coerce_int(c.get("combat_skill"))
+            end = _coerce_int(c.get("endurance"))
+            if name and cs is not None and end is not None:
+                validated_combats.append({
+                    "enemy_name": name,
+                    "combat_skill": cs,
+                    "endurance": end,
+                    "ordinal": c.get("ordinal", 1),
+                })
+    result["combat_encounters"] = validated_combats
+
+    # Items
+    raw_items = raw.get("items", [])
+    validated_items: list[dict] = []
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            iname = item.get("item_name", "").strip()
+            itype = item.get("item_type", "").lower()
+            action = item.get("action", "").lower()
+            if iname and itype in _VALID_ITEM_TYPES and action in _VALID_ACTIONS:
+                validated_items.append({
+                    "item_name": iname,
+                    "item_type": itype,
+                    "quantity": _coerce_int(item.get("quantity")) or 1,
+                    "action": action,
+                })
+    result["items"] = validated_items
+
+    # Random outcomes
+    raw_outcomes = raw.get("random_outcomes", [])
+    validated_outcomes: list[dict] = []
+    if isinstance(raw_outcomes, list):
+        for o in raw_outcomes:
+            if not isinstance(o, dict):
+                continue
+            rmin = _coerce_int(o.get("range_min"))
+            rmax = _coerce_int(o.get("range_max"))
+            etype = o.get("effect_type", "")
+            if rmin is not None and rmax is not None and etype in _VALID_EFFECT_TYPES:
+                validated_outcomes.append({
+                    "range_min": rmin,
+                    "range_max": rmax,
+                    "effect_type": etype,
+                    "effect_value": str(o.get("effect_value", "")),
+                    "narrative_text": o.get("narrative_text"),
+                })
+    result["random_outcomes"] = validated_outcomes
+
+    # Evasion
+    raw_evasion = raw.get("evasion")
+    if isinstance(raw_evasion, dict):
+        rounds = _coerce_int(raw_evasion.get("rounds"))
+        target = _coerce_int(raw_evasion.get("target_scene"))
+        if rounds is not None and target is not None:
+            damage = _coerce_int(raw_evasion.get("damage"))
+            result["evasion"] = {
+                "rounds": rounds,
+                "target_scene": target,
+                "damage": damage if damage is not None else 0,
+            }
+        else:
+            result["evasion"] = None
+    else:
+        result["evasion"] = None
+
+    # Combat modifiers
+    raw_mods = raw.get("combat_modifiers", [])
+    validated_mods: list[dict] = []
+    if isinstance(raw_mods, list):
+        for m in raw_mods:
+            if not isinstance(m, dict):
+                continue
+            mtype = m.get("modifier_type", "")
+            if mtype in _VALID_MODIFIER_TYPES:
+                val = m.get("value")
+                validated_mods.append({
+                    "modifier_type": mtype,
+                    "value": val if isinstance(val, int) else None,
+                })
+    result["combat_modifiers"] = validated_mods
+
+    # Conditions
+    raw_conditions = raw.get("conditions", [])
+    validated_conditions: list[dict] = []
+    if isinstance(raw_conditions, list):
+        for cond in raw_conditions:
+            if not isinstance(cond, dict):
+                continue
+            ctype = cond.get("condition_type", "")
+            cval = cond.get("condition_value")
+            ordinal = cond.get("choice_ordinal")
+            if ctype in _VALID_CONDITION_TYPES and isinstance(ordinal, int):
+                # condition_value can be str, dict, or None
+                if isinstance(cval, dict):
+                    cval = json.dumps(cval)
+                elif cval is not None:
+                    cval = str(cval)
+                validated_conditions.append({
+                    "choice_ordinal": ordinal,
+                    "condition_type": ctype,
+                    "condition_value": cval,
+                })
+    result["conditions"] = validated_conditions
+
+    # Scene flags
+    raw_flags = raw.get("scene_flags", {})
+    if isinstance(raw_flags, dict):
+        result["scene_flags"] = {
+            k: bool(raw_flags.get(k, False)) for k in _VALID_FLAG_KEYS
+        }
+    else:
+        result["scene_flags"] = {k: False for k in _VALID_FLAG_KEYS}
+
+    return result
+
+
+def analyze_scene(
+    narrative: str,
+    choices_raw: list[str],
+    book_id: int,
+    scene_number: int,
+    existing_catalog: dict,
+    client: object | None = None,
+    skip_llm: bool = False,
+    no_cache: bool = False,
+) -> "SceneAnalysisData | None":
+    """Perform comprehensive scene analysis using Claude Haiku.
+
+    Combines entity extraction, relationship inference, and structured game
+    mechanics extraction into a single LLM call.  Replaces separate calls to
+    :func:`extract_entities` and :func:`infer_relationships` with a unified
+    prompt that also detects combat encounters, items, conditions, random
+    outcomes, evasion rules, combat modifiers, and scene flags.
+
+    Args:
+        narrative: Plain-text narrative of the scene.
+        choices_raw: List of raw choice texts for the scene (used for
+            condition extraction).
+        book_id: Numeric book identifier.
+        scene_number: Scene number within the book.
+        existing_catalog: Dict mapping lower-cased entity name to entity data.
+            Entities already in the catalog are excluded from the result.
+        client: Optional pre-configured Anthropic client.
+        skip_llm: When ``True`` return ``None`` without calling the LLM.
+        no_cache: When ``True`` bypass the file-based response cache.
+
+    Returns:
+        A :class:`~app.parser.types.SceneAnalysisData` with the full
+        structured extraction, or ``None`` on skip/error/empty narrative.
+    """
+    from app.parser.types import SceneAnalysisData  # noqa: PLC0415
+
+    if skip_llm:
+        return None
+
+    if not narrative or not narrative.strip():
+        return None
+
+    key = _scene_analysis_cache_key(narrative, book_id, scene_number)
+
+    if not no_cache:
+        cached_raw = _get_cached(key)
+        if cached_raw is not None:
+            logger.debug("Cache hit for scene analysis (book %d, scene %d)", book_id, scene_number)
+            parsed = _parse_json_llm(cached_raw)
+            validated = _validate_scene_analysis(parsed)
+            if validated is not None:
+                # Filter entities against catalog
+                validated["entities"] = _filter_new_entities(
+                    validated["entities"], existing_catalog,
+                )
+                return SceneAnalysisData(**validated)
+
+    # Resolve or create the Anthropic client
+    if client is None:
+        try:
+            import anthropic  # noqa: PLC0415
+
+            client = anthropic.Anthropic()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to create Anthropic client: %s", exc)
+            return None
+
+    # Build choices text for the prompt
+    if choices_raw:
+        choices_text = "\n".join(
+            f"{i + 1}. {text}" for i, text in enumerate(choices_raw)
+        )
+    else:
+        choices_text = "(no choices — this may be a death or victory scene)"
+
+    user_prompt = _SCENE_ANALYSIS_USER.format(
+        book_number=book_id,
+        scene_number=scene_number,
+        narrative=narrative[:2000],
+        choices_text=choices_text,
+    )
+
+    try:
+        message = client.messages.create(  # type: ignore[union-attr]
+            model=_MODEL,
+            max_tokens=2048,
+            system=_SCENE_ANALYSIS_SYSTEM,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw_text: str = message.content[0].text.strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Scene analysis LLM call failed for book %d scene %d: %s",
+            book_id, scene_number, exc,
+        )
+        return None
+
+    if not no_cache:
+        _set_cached(key, raw_text, user_prompt)
+
+    parsed_data = _parse_json_llm(raw_text)
+    validated = _validate_scene_analysis(parsed_data)
+    if validated is None:
+        logger.warning(
+            "Scene analysis returned invalid data for book %d scene %d",
+            book_id, scene_number,
+        )
+        return None
+
+    # Filter entities against existing catalog
+    validated["entities"] = _filter_new_entities(
+        validated["entities"], existing_catalog,
+    )
+
+    return SceneAnalysisData(**validated)
 
 
 # ---------------------------------------------------------------------------

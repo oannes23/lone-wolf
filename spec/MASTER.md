@@ -8,7 +8,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 - **Database**: SQLite (dev), PostgreSQL (prod)
 - **Player UI**: HTMX + Jinja2, styled HTML narrative
 - **Admin UI**: HTMX + Jinja2, content management + report triage
-- **Parser**: XHTML import pipeline with Anthropic Haiku for text rewriting + entity extraction
+- **Parser**: XHTML import pipeline with Anthropic Haiku for text rewriting, unified scene analysis (entities, relationships, combat, items, random outcomes, conditions, scene flags), and a manual+LLM merge layer
 - **Game Object Taxonomy**: Kind-based knowledge graph of characters, locations, creatures, organizations, items, foes, and scenes across all books, linked by tagged refs. Follows ops.md GameObject pattern.
 - **Package manager**: `uv`
 
@@ -19,7 +19,7 @@ A Python FastAPI web server that lets players create accounts, log in, and play 
 | [data-model.md](data-model.md) | 🟢 Specced | Database schema — content, player, admin, wizard, and taxonomy tables |
 | [api.md](api.md) | 🟢 Specced | REST API design — auth, gameplay, admin, game objects, leaderboards |
 | [game-engine.md](game-engine.md) | 🟢 Specced | Pure game logic — combat, disciplines, inventory, transitions |
-| [parser.md](parser.md) | 🟢 Specced | XHTML extraction pipeline with LLM text rewriting |
+| [parser.md](parser.md) | 🟢 Specced | XHTML extraction pipeline with LLM text rewriting, unified scene analysis, and merge layer. Last verified: 2026-03-23 |
 | [todo.md](todo.md) | 🟢 Resolved | Pre-implementation review findings — 49 items total (29 original + 14 spec completion + 8 deferred post-MVP) |
 | [seed-data.md](seed-data.md) | 🟢 Specced | Kai-era seed data — weapon categories, starting equipment, transition rules, wizard templates |
 
