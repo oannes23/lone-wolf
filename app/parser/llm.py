@@ -873,9 +873,9 @@ def _validate_scene_analysis(raw: object) -> dict | None:
         for item in raw_items:
             if not isinstance(item, dict):
                 continue
-            iname = item.get("item_name", "").strip()
-            itype = item.get("item_type", "").lower()
-            action = item.get("action", "").lower()
+            iname = (item.get("item_name") or "").strip()
+            itype = (item.get("item_type") or "").lower()
+            action = (item.get("action") or "").lower()
             if iname and itype in _VALID_ITEM_TYPES and action in _VALID_ACTIONS:
                 validated_items.append({
                     "item_name": iname,
