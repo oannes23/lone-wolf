@@ -425,6 +425,16 @@ def _enrich_with_llm(
         }
         m_flags, w = merge_scene_flags(manual_flags, llm_flags, sn)
         warnings.extend(w)
+
+        # Guard: a scene with outgoing choices cannot be a death scene
+        has_choices = any(c["scene_number"] == sn for c in choice_dicts)
+        if m_flags.get("is_death") and has_choices:
+            m_flags["is_death"] = False
+            warnings.append(
+                f"MERGE_OVERRIDE scene={sn} field=is_death: "
+                f"overridden to False — scene has outgoing choices"
+            )
+
         if scene_dict:
             scene_dict["must_eat"] = m_flags.get("must_eat", False)
             scene_dict["loses_backpack"] = m_flags.get("loses_backpack", False)

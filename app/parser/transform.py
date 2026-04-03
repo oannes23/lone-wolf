@@ -217,6 +217,10 @@ def detect_backpack_loss(narrative: str) -> bool:
         "backpack is taken",
         "backpack is stolen",
         "lose the backpack",
+        "equipment is confiscated",
+        "equipment are confiscated",
+        "belongings are confiscated",
+        "belongings are seized",
         "backpack has been lost",
     ]
     return any(p in text for p in patterns)
@@ -313,10 +317,14 @@ def detect_items(
 
     # --- Generic "you may take the X" gains ---
     take_matches = re.finditer(r"you may take (?:the\s+)?(.+?)[\.,]", text)
+    _take_skip = ["these items", "this weapon", "any of these", "action chart",
+                  "them and", "it if you", "this if you"]
     for m in take_matches:
         name = m.group(1).strip().title()
         if "gold" in name.lower() or "meal" in name.lower():
             continue  # already handled above
+        if any(phrase in name.lower() for phrase in _take_skip):
+            continue  # meta-instruction, not an actual item name
         items.append(
             {
                 "item_name": name,
@@ -332,6 +340,8 @@ def detect_items(
         name = m.group(1).strip()
         if "backpack" in name or "gold" in name or "crown" in name:
             continue  # handled elsewhere
+        if re.search(r"endurance", name, re.IGNORECASE):
+            continue  # meter effect, not an item
         name_title = name.title()
         items.append(
             {
@@ -378,10 +388,15 @@ def detect_death_scene(
         "you have met your end",
         "death comes",
         "your quest ends here",
+        "your quest ends",
         "you are slain",
         "you perish",
         "you die",
         "your life is over",
+        "your life end here",
+        "your mission end here",
+        "comes to a tragic end",
+        "come to a tragic end",
     ]
     return any(p in text for p in death_patterns)
 
@@ -414,6 +429,8 @@ def detect_victory_scene(
         "your quest has been fulfilled",
         "you have achieved",
         "your journey is complete",
+        "the victory is yours",
+        "victory is yours",
     ]
     return any(p in text for p in victory_patterns)
 

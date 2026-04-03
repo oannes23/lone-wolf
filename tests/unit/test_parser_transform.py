@@ -169,6 +169,21 @@ class TestDetectBackpackLoss:
     def test_case_insensitive(self) -> None:
         assert detect_backpack_loss("YOU LOSE YOUR BACKPACK.") is True
 
+    def test_equipment_confiscated(self) -> None:
+        assert detect_backpack_loss(
+            "All your equipment is confiscated, including all Special Items and Weapons."
+        ) is True
+
+    def test_belongings_seized(self) -> None:
+        assert detect_backpack_loss(
+            "Your belongings are seized by the soldiers."
+        ) is True
+
+    def test_someone_else_backpack_is_false(self) -> None:
+        assert detect_backpack_loss(
+            "The thief drops his backpack and runs."
+        ) is False
+
 
 # ===========================================================================
 # detect_items
@@ -217,6 +232,38 @@ class TestDetectItems:
         items = detect_items("You find 3 Gold Crowns.", choices=["Turn to 10."])
         assert any(i["item_name"] == "Gold Crowns" for i in items)
 
+    def test_endurance_loss_not_item(self) -> None:
+        """Endurance point changes are meter effects, not items."""
+        items = detect_items("You lose 5 <Small>Endurance</Small> Points and drop to the hold.")
+        endurance_items = [i for i in items if "endurance" in i["item_name"].lower()]
+        assert endurance_items == []
+
+    def test_endurance_point_singular_not_item(self) -> None:
+        items = detect_items("You lose 1 <Small>Endurance</Small> Point in the fall.")
+        endurance_items = [i for i in items if "endurance" in i["item_name"].lower()]
+        assert endurance_items == []
+
+    def test_lose_sword_still_detected(self) -> None:
+        """Ensure the Endurance filter doesn't break normal item loss detection."""
+        items = detect_items("You lose your Sword in the river.")
+        assert any(i["action"] == "lose" for i in items)
+
+    def test_take_meta_instruction_not_item(self) -> None:
+        """'you may take these items if you wish' is not an item named 'These Items If You Wish'."""
+        items = detect_items("You may take these items if you wish.")
+        garbled = [i for i in items if "these items" in i["item_name"].lower()]
+        assert garbled == []
+
+    def test_take_this_weapon_not_item(self) -> None:
+        items = detect_items("You may take this weapon if you wish.")
+        garbled = [i for i in items if "this weapon" in i["item_name"].lower()]
+        assert garbled == []
+
+    def test_take_actual_item_still_detected(self) -> None:
+        """'you may take the Dagger' should still be detected."""
+        items = detect_items("You may take the Dagger.")
+        assert any(i["item_name"] == "Dagger" and i["action"] == "gain" for i in items)
+
 
 # ===========================================================================
 # detect_death_scene
@@ -249,6 +296,33 @@ class TestDetectDeathScene:
     def test_you_perish(self) -> None:
         assert detect_death_scene("You perish in the flames.", choices=None) is True
 
+    def test_life_and_mission_end_here(self) -> None:
+        assert detect_death_scene(
+            "Your mission and your life end here.", choices=[]
+        ) is True
+
+    def test_mission_and_life_end_here(self) -> None:
+        assert detect_death_scene(
+            "Your life and your mission end here.", choices=None
+        ) is True
+
+    def test_quest_comes_to_tragic_end(self) -> None:
+        assert detect_death_scene(
+            "Your quest comes to a tragic end in the swamp.", choices=[]
+        ) is True
+
+    def test_quest_ends(self) -> None:
+        assert detect_death_scene(
+            "Your quest ends in the darkness.", choices=None
+        ) is True
+
+    def test_death_language_with_choices_still_false(self) -> None:
+        """Even new death patterns should return False when choices exist."""
+        assert detect_death_scene(
+            "Your mission and your life end here.",
+            choices=["Turn to 194."],
+        ) is False
+
 
 # ===========================================================================
 # detect_victory_scene
@@ -273,6 +347,17 @@ class TestDetectVictoryScene:
 
     def test_choices_param_accepted(self) -> None:
         assert detect_victory_scene("Your quest is complete.", choices=["Turn to 10."]) is True
+
+    def test_victory_is_yours(self) -> None:
+        assert detect_victory_scene(
+            "The victory is yours! You have defeated the Darklords."
+        ) is True
+
+    def test_casual_victory_mention_is_false(self) -> None:
+        """Mentioning 'victory' in passing should not trigger detection."""
+        assert detect_victory_scene(
+            "The soldiers celebrate their recent victory in the tavern."
+        ) is False
 
 
 # ===========================================================================
