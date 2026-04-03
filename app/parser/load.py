@@ -77,6 +77,7 @@ def upsert_with_source(
         filtered = {k: v for k, v in data.items() if k in valid_cols}
         instance = model(**filtered)
         db.add(instance)
+        db.flush()
         return instance
 
     if getattr(existing, "source", None) == "manual":
