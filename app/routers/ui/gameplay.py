@@ -13,9 +13,11 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.admin import Report
-from app.models.player import Character, User
+from app.models.content import Book, Scene
+from app.models.player import Character, CharacterItem, User
 from app.schemas.reports import VALID_TAGS
 from app.limiter import limiter
 from app.services.combat_service import resolve_evasion, resolve_round
@@ -95,6 +97,25 @@ def scene_page(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    debug_playtest = get_settings().DEBUG_PLAYTEST
+    debug_context: dict = {}
+    if debug_playtest:
+        from app.services.debug_service import get_scene_merge_conflicts
+
+        book = db.query(Book).filter(Book.id == character.book_id).first()
+        if book:
+            debug_context["merge_conflicts"] = get_scene_merge_conflicts(
+                book.slug, scene_data.scene_number
+            )
+        all_scene_numbers = [
+            row[0]
+            for row in db.query(Scene.number)
+            .filter(Scene.book_id == character.book_id)
+            .order_by(Scene.number)
+            .all()
+        ]
+        debug_context["all_scene_numbers"] = all_scene_numbers
+
     return templates.TemplateResponse(
         request,
         "gameplay/scene.html",
@@ -102,6 +123,8 @@ def scene_page(
             "character": character,
             "scene": scene_data,
             "valid_tags": sorted(VALID_TAGS),
+            "debug_playtest": debug_playtest,
+            "debug": debug_context,
         },
     )
 
@@ -801,3 +824,79 @@ def report_submit(
             "</div>"
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Debug / playtest routes (only active when DEBUG_PLAYTEST=true)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{character_id}/debug/jump")
+def debug_jump_submit(
+    request: Request,
+    character_id: int,
+    scene_number: int = Form(...),
+    current_user: User = Depends(get_current_ui_user),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Jump to any scene in the same book (debug mode only)."""
+    if not get_settings().DEBUG_PLAYTEST:
+        raise HTTPException(status_code=403, detail="Debug mode not enabled")
+
+    character = db.query(Character).filter(Character.id == character_id).first()
+    if not character or character.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your character")
+
+    target_scene = (
+        db.query(Scene)
+        .filter(Scene.book_id == character.book_id, Scene.number == scene_number)
+        .first()
+    )
+    if not target_scene:
+        raise HTTPException(status_code=404, detail=f"Scene {scene_number} not found")
+
+    # Revive if dead
+    if not character.is_alive:
+        character.is_alive = True
+
+    # Clear transient state
+    character.active_combat_encounter_id = None
+    character.pending_choice_id = None
+
+    transition_to_scene(db=db, character=character, target_scene_id=target_scene.id)
+    db.commit()
+
+    return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)
+
+
+@router.post("/{character_id}/debug/add-item")
+def debug_add_item_submit(
+    request: Request,
+    character_id: int,
+    item_name: str = Form(...),
+    item_type: str = Form(...),
+    current_user: User = Depends(get_current_ui_user),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Add any item to inventory (debug mode only)."""
+    if not get_settings().DEBUG_PLAYTEST:
+        raise HTTPException(status_code=403, detail="Debug mode not enabled")
+
+    character = db.query(Character).filter(Character.id == character_id).first()
+    if not character or character.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your character")
+
+    if item_type not in ("weapon", "backpack", "special"):
+        raise HTTPException(status_code=400, detail="Invalid item type")
+
+    new_item = CharacterItem(
+        character_id=character.id,
+        item_name=item_name.strip(),
+        item_type=item_type,
+        is_equipped=False,
+    )
+    db.add(new_item)
+    character.version += 1
+    db.commit()
+
+    return RedirectResponse(url=f"/ui/game/{character_id}", status_code=303)

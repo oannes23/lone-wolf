@@ -501,6 +501,61 @@
   </details>
 
   {# -----------------------------------------------------------------------
+     Debug / Playtest panel (only when DEBUG_PLAYTEST=true)
+  ----------------------------------------------------------------------- #}
+  {% if debug_playtest %}
+  <details class="debug-panel" open>
+    <summary>Debug / Playtest</summary>
+    <div class="debug-content">
+
+      {% if debug.merge_conflicts %}
+      <section class="debug-section">
+        <h4>Merge Conflicts ({{ debug.merge_conflicts | length }})</h4>
+        <ul class="debug-conflict-list">
+          {% for conflict in debug.merge_conflicts %}
+          <li class="debug-conflict-item"><code>{{ conflict }}</code></li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+      <section class="debug-section">
+        <h4>Jump to Scene</h4>
+        <form method="post" action="/ui/game/{{ character.id }}/debug/jump"
+              class="debug-inline-form">
+          <select name="scene_number">
+            {% for num in debug.all_scene_numbers %}
+            <option value="{{ num }}"
+              {% if num == scene.scene_number %}selected{% endif %}>
+              Scene {{ num }}
+            </option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="debug-btn">Jump</button>
+        </form>
+      </section>
+
+      <section class="debug-section">
+        <h4>Add Item</h4>
+        <form method="post" action="/ui/game/{{ character.id }}/debug/add-item"
+              class="debug-inline-form">
+          <input type="text" name="item_name" placeholder="Item name" required>
+          <select name="item_type">
+            <option value="backpack">Backpack</option>
+            <option value="weapon">Weapon</option>
+            <option value="special">Special</option>
+          </select>
+          <button type="submit" class="debug-btn">Add</button>
+        </form>
+      </section>
+
+      <p class="debug-note">Death immunity is active.</p>
+
+    </div>
+  </details>
+  {% endif %}
+
+  {# -----------------------------------------------------------------------
      Bug report collapsible
   ----------------------------------------------------------------------- #}
   <details class="bug-report-details">

@@ -14,6 +14,7 @@ from app.engine.random import (
     resolve_phase_random as _engine_phase_random,
     resolve_scene_exit_random as _engine_scene_exit,
 )
+from app.config import get_settings
 from app.engine.types import CharacterState, ChoiceData, RandomOutcomeData
 from app.events import log_character_event, log_decision
 from app.models.content import Choice, Scene
@@ -298,7 +299,10 @@ def _resolve_phase_random(
         elif effect_type == "endurance_change":
             character.endurance_current = effect["new_endurance"]
             if effect.get("is_dead"):
-                mark_character_dead(character)
+                if get_settings().DEBUG_PLAYTEST:
+                    character.endurance_current = 1
+                else:
+                    mark_character_dead(character)
         elif effect_type == "meal_change":
             character.meals = effect["new_meals"]
         # item_gain and item_loss are logged as events but not immediately

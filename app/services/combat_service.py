@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.engine.combat import evade_combat, resolve_combat_round, should_fight
 from app.engine.types import CombatContext, CombatEncounterData, CombatModifierData
 from app.events import log_character_event
@@ -373,41 +374,44 @@ def resolve_round(
     result_str = "continue"
 
     if round_result.hero_dead:
-        result_str = "loss"
+        if get_settings().DEBUG_PLAYTEST:
+            character.endurance_current = 1
+        else:
+            result_str = "loss"
 
-        # Mark character dead and clear phase state
-        mark_character_dead(character)
+            # Mark character dead and clear phase state
+            mark_character_dead(character)
 
-        # Log combat_end event
-        combat_end_event = log_character_event(
-            db=db,
-            character=character,
-            event_type="combat_end",
-            scene_id=character.current_scene_id,
-            phase="combat",
-            details={
-                "encounter_id": encounter.id,
-                "enemy_name": encounter.enemy_name,
-                "result": "hero_dead",
-                "rounds_fought": round_number,
-            },
-        )
+            # Log combat_end event
+            combat_end_event = log_character_event(
+                db=db,
+                character=character,
+                event_type="combat_end",
+                scene_id=character.current_scene_id,
+                phase="combat",
+                details={
+                    "encounter_id": encounter.id,
+                    "enemy_name": encounter.enemy_name,
+                    "result": "hero_dead",
+                    "rounds_fought": round_number,
+                },
+            )
 
-        # Log death event with parent_event_id pointing to combat_end
-        log_character_event(
-            db=db,
-            character=character,
-            event_type="death",
-            scene_id=character.current_scene_id,
-            phase="combat",
-            details={
-                "cause": "combat",
-                "encounter_id": encounter.id,
-                "enemy_name": encounter.enemy_name,
-                "round_number": round_number,
-            },
-            parent_event_id=combat_end_event.id,
-        )
+            # Log death event with parent_event_id pointing to combat_end
+            log_character_event(
+                db=db,
+                character=character,
+                event_type="death",
+                scene_id=character.current_scene_id,
+                phase="combat",
+                details={
+                    "cause": "combat",
+                    "encounter_id": encounter.id,
+                    "enemy_name": encounter.enemy_name,
+                    "round_number": round_number,
+                },
+                parent_event_id=combat_end_event.id,
+            )
 
     elif round_result.enemy_dead:
         result_str = "win"
@@ -543,27 +547,30 @@ def resolve_evasion(
     )
 
     if evade_result.hero_dead:
-        # Death during evasion — no transition
-        mark_character_dead(character)
+        if get_settings().DEBUG_PLAYTEST:
+            character.endurance_current = 1
+        else:
+            # Death during evasion — no transition
+            mark_character_dead(character)
 
-        log_character_event(
-            db=db,
-            character=character,
-            event_type="death",
-            scene_id=character.current_scene_id,
-            phase="combat",
-            details={
-                "cause": "evasion_damage",
-                "encounter_id": encounter.id,
-                "enemy_name": encounter.enemy_name,
-            },
-            parent_event_id=evasion_event.id,
-        )
+            log_character_event(
+                db=db,
+                character=character,
+                event_type="death",
+                scene_id=character.current_scene_id,
+                phase="combat",
+                details={
+                    "cause": "evasion_damage",
+                    "encounter_id": encounter.id,
+                    "enemy_name": encounter.enemy_name,
+                },
+                parent_event_id=evasion_event.id,
+            )
 
-        character.version += 1
-        character.updated_at = datetime.now(UTC)
-        db.flush()
-        return evade_result.evasion_damage, True
+            character.version += 1
+            character.updated_at = datetime.now(UTC)
+            db.flush()
+            return evade_result.evasion_damage, True
 
     # Survival — transition to evasion target scene using the full transition function.
     # transition_to_scene increments version and runs automatic phases.

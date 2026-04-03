@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ADMIN_TOKEN_EXPIRE_HOURS: int = 8
     ROLL_TOKEN_EXPIRE_HOURS: int = 1
+    DEBUG_PLAYTEST: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

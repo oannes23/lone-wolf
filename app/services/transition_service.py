@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.engine.conditions import filter_choices
 from app.engine.meters import apply_gold_delta, apply_meal_delta
 from app.engine.phases import compute_phase_sequence, run_automatic_phase
@@ -61,7 +62,7 @@ def transition_to_scene(
     character.current_scene_id = target_scene_id
 
     # Step 2: Death scene check — mark dead and bail out early.
-    if new_scene.is_death:
+    if new_scene.is_death and not get_settings().DEBUG_PLAYTEST:
         mark_character_dead(character)
         increment_version(character, db)
         db.flush()
@@ -103,10 +104,14 @@ def transition_to_scene(
 
             # If death occurred during an automatic phase, stop immediately.
             if result.state_changes.get("is_alive") is False:
-                mark_character_dead(character)
-                increment_version(character, db)
-                db.flush()
-                return get_scene_state(db=db, character=character)
+                if get_settings().DEBUG_PLAYTEST:
+                    result.state_changes.pop("is_alive", None)
+                    character.endurance_current = max(1, character.endurance_current)
+                else:
+                    mark_character_dead(character)
+                    increment_version(character, db)
+                    db.flush()
+                    return get_scene_state(db=db, character=character)
 
         else:
             # First interactive phase — stop automatic processing here.
