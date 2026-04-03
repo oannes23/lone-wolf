@@ -184,6 +184,26 @@ class TestDetectBackpackLoss:
             "The thief drops his backpack and runs."
         ) is False
 
+    def test_take_your_backpack(self) -> None:
+        assert detect_backpack_loss(
+            "They take your Backpack and Weapons."
+        ) is True
+
+    def test_lost_your_backpack(self) -> None:
+        assert detect_backpack_loss(
+            "You have lost your Backpack and Weapons but you have your life."
+        ) is True
+
+    def test_erase_backpack_items(self) -> None:
+        assert detect_backpack_loss(
+            "You must now erase all Weapons and Backpack Items from your Action Chart."
+        ) is True
+
+    def test_items_stolen(self) -> None:
+        assert detect_backpack_loss(
+            "Your Backpack, your Weapons, and all your Special Items have been stolen."
+        ) is True
+
 
 # ===========================================================================
 # detect_items
@@ -264,6 +284,31 @@ class TestDetectItems:
         items = detect_items("You may take the Dagger.")
         assert any(i["item_name"] == "Dagger" and i["action"] == "gain" for i in items)
 
+    def test_lose_footing_not_item(self) -> None:
+        items = detect_items("You lose your footing and fall headlong over the edge.")
+        footing_items = [i for i in items if "footing" in i["item_name"].lower()]
+        assert footing_items == []
+
+    def test_lose_consciousness_not_item(self) -> None:
+        items = detect_items("You lose consciousness.")
+        assert items == []
+
+    def test_take_sword_if_you_wish_not_garbled(self) -> None:
+        """Should extract 'Sword' not 'Sword If You Wish'."""
+        items = detect_items("You may take the Sword if you wish.")
+        garbled = [i for i in items if "if you wish" in i["item_name"].lower()]
+        assert garbled == []
+
+    def test_take_these_if_you_wish_not_item(self) -> None:
+        items = detect_items("You may take these if you wish.")
+        garbled = [i for i in items if "these if" in i["item_name"].lower()]
+        assert garbled == []
+
+    def test_take_both_not_garbled(self) -> None:
+        items = detect_items("You may take both the Dagger and the Crowns if you are able to.")
+        garbled = [i for i in items if "both the" in i["item_name"].lower()]
+        assert garbled == []
+
 
 # ===========================================================================
 # detect_death_scene
@@ -323,6 +368,16 @@ class TestDetectDeathScene:
             choices=["Turn to 194."],
         ) is False
 
+    def test_life_and_quest_end_here(self) -> None:
+        assert detect_death_scene(
+            "Your life and your quest end here.", choices=[]
+        ) is True
+
+    def test_mission_ends_here(self) -> None:
+        assert detect_death_scene(
+            "Your mission ends here.", choices=None
+        ) is True
+
 
 # ===========================================================================
 # detect_victory_scene
@@ -358,6 +413,11 @@ class TestDetectVictoryScene:
         assert detect_victory_scene(
             "The soldiers celebrate their recent victory in the tavern."
         ) is False
+
+    def test_begin_adventure_with_next_book(self) -> None:
+        assert detect_victory_scene(
+            "Begin your adventure with Book 2 of the Lone Wolf adventures."
+        ) is True
 
 
 # ===========================================================================

@@ -222,6 +222,11 @@ def detect_backpack_loss(narrative: str) -> bool:
         "belongings are confiscated",
         "belongings are seized",
         "backpack has been lost",
+        "take your backpack",
+        "lost your backpack",
+        "lost your weapon",
+        "have been stolen",
+        "erase all weapons and backpack",
     ]
     return any(p in text for p in patterns)
 
@@ -318,7 +323,8 @@ def detect_items(
     # --- Generic "you may take the X" gains ---
     take_matches = re.finditer(r"you may take (?:the\s+)?(.+?)[\.,]", text)
     _take_skip = ["these items", "this weapon", "any of these", "action chart",
-                  "them and", "it if you", "this if you"]
+                  "them and", "it if you", "this if you", "these if you",
+                  "if you wish", "if you are able", "both the"]
     for m in take_matches:
         name = m.group(1).strip().title()
         if "gold" in name.lower() or "meal" in name.lower():
@@ -342,6 +348,9 @@ def detect_items(
             continue  # handled elsewhere
         if re.search(r"endurance", name, re.IGNORECASE):
             continue  # meter effect, not an item
+        name_lower = name.lower()
+        if any(w in name_lower for w in ("footing", "consciousness", "balance", "way")):
+            continue  # physical state, not an item
         name_title = name.title()
         items.append(
             {
@@ -389,11 +398,13 @@ def detect_death_scene(
         "death comes",
         "your quest ends here",
         "your quest ends",
+        "your quest end here",
         "you are slain",
         "you perish",
         "you die",
         "your life is over",
         "your life end here",
+        "your mission ends here",
         "your mission end here",
         "comes to a tragic end",
         "come to a tragic end",
@@ -431,6 +442,7 @@ def detect_victory_scene(
         "your journey is complete",
         "the victory is yours",
         "victory is yours",
+        "begin your adventure with book",
     ]
     return any(p in text for p in victory_patterns)
 
