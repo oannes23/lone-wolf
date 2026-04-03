@@ -43,6 +43,9 @@ class GameObject(Base):
         foreign_keys="GameObjectRef.target_id",
         back_populates="target_obj",
     )
+    scene_appearances = relationship(
+        "GameObjectSceneAppearance", back_populates="game_object"
+    )
 
     __table_args__ = (
         UniqueConstraint("name", "kind", name="uq_game_objects_name_kind"),
@@ -90,6 +93,40 @@ class GameObjectRef(Base):
         ),
         Index("ix_game_object_refs_source_id", "source_id"),
         Index("ix_game_object_refs_target_id", "target_id"),
+    )
+
+
+class GameObjectSceneAppearance(Base):
+    """Records which scenes each game object appears in and how."""
+
+    __tablename__ = "game_object_scene_appearances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_object_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("game_objects.id", ondelete="CASCADE"), nullable=False
+    )
+    scene_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False
+    )
+    appearance_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(10), nullable=False)
+
+    # Relationships
+    game_object = relationship("GameObject", back_populates="scene_appearances")
+    scene = relationship("Scene", back_populates="game_object_appearances")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "game_object_id", "scene_id", "appearance_type",
+            name="uq_gosa_go_scene_type",
+        ),
+        CheckConstraint(
+            "appearance_type IN ('narrative', 'combat_foe', 'item', 'scene_object')",
+            name="ck_gosa_appearance_type",
+        ),
+        CheckConstraint("source IN ('auto', 'manual')", name="ck_gosa_source"),
+        Index("ix_gosa_game_object_id", "game_object_id"),
+        Index("ix_gosa_scene_id", "scene_id"),
     )
 
 

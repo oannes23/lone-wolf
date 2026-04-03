@@ -32,6 +32,7 @@ from app.models.taxonomy import (
     BookTransitionRule,
     GameObject,
     GameObjectRef,
+    GameObjectSceneAppearance,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ def load_book(
     weapon_categories: list[dict],
     starting_equipment: list[dict],
     transition_rules: list[dict],
+    scene_appearances: list[dict] | None = None,
 ) -> dict:
     """Load all parsed book data into the database in FK dependency order.
 
@@ -776,6 +778,44 @@ def load_book(
 
     db.flush()
     summary["transition_rules"] = loaded_tr
+
+    # ------------------------------------------------------------------
+    # 19. Scene appearances (optional)
+    # ------------------------------------------------------------------
+    loaded_appearances = 0
+    if scene_appearances:
+        for app in scene_appearances:
+            scene_number = app.get("scene_number")
+            scene_id = scene_number_to_id.get(scene_number) if scene_number else None
+            if scene_id is None:
+                continue
+
+            go_id = _resolve_game_object(
+                "game_object_kind", "game_object_name", app
+            )
+            if go_id is None:
+                continue
+
+            existing = (
+                db.query(GameObjectSceneAppearance)
+                .filter_by(
+                    game_object_id=go_id,
+                    scene_id=scene_id,
+                    appearance_type=app["appearance_type"],
+                )
+                .one_or_none()
+            )
+            if existing is None:
+                db.add(GameObjectSceneAppearance(
+                    game_object_id=go_id,
+                    scene_id=scene_id,
+                    appearance_type=app["appearance_type"],
+                    source=app.get("source", "auto"),
+                ))
+                loaded_appearances += 1
+
+        db.flush()
+    summary["scene_appearances"] = loaded_appearances
 
     logger.info(
         "load_book complete for %s: %s",

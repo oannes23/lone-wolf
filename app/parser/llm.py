@@ -332,11 +332,32 @@ def _parse_json_llm(text: str) -> object:
         return None
 
 
+def _normalize_for_dedup(name: str) -> str:
+    """Normalize a name for dedup comparison.
+
+    Strips articles, lowercases, and applies simple depluralization.
+    """
+    n = name.lower().strip()
+    for article in ("the ", "a ", "an "):
+        if n.startswith(article):
+            n = n[len(article):]
+    if n.endswith("ves") and len(n) > 4:
+        n = n[:-3] + "f"
+    elif n.endswith("ies") and len(n) > 4:
+        n = n[:-3] + "y"
+    elif n.endswith("es") and not n.endswith("ss") and len(n) > 3:
+        n = n[:-2]
+    elif n.endswith("s") and not n.endswith("ss") and len(n) > 3:
+        n = n[:-1]
+    return n
+
+
 def _filter_new_entities(raw_entities: list, existing_catalog: dict) -> list[dict]:
     """Filter and validate raw entity dicts from LLM output.
 
-    Removes entities already in the catalog (case-insensitive name match),
-    those with unknown kinds, or those missing a name.
+    Removes entities already in the catalog via exact name match,
+    normalized form match (singular/plural, article stripping),
+    or alias overlap. Also filters unknown kinds and missing names.
 
     Args:
         raw_entities: List of raw entity dicts from the LLM.
@@ -345,6 +366,15 @@ def _filter_new_entities(raw_entities: list, existing_catalog: dict) -> list[dic
     Returns:
         A list of validated, deduplicated entity dicts.
     """
+    # Build a normalized lookup and alias lookup from the catalog
+    norm_to_catalog: dict[str, str] = {}  # normalized → catalog key
+    alias_to_catalog: dict[str, str] = {}  # alias lower → catalog key
+    for key, data in existing_catalog.items():
+        norm_to_catalog[_normalize_for_dedup(key)] = key
+        for alias in data.get("aliases", []):
+            if isinstance(alias, str):
+                alias_to_catalog[alias.lower()] = key
+
     results: list[dict] = []
     for entity in raw_entities:
         if not isinstance(entity, dict):
@@ -352,9 +382,29 @@ def _filter_new_entities(raw_entities: list, existing_catalog: dict) -> list[dic
         name: str = entity.get("name", "").strip()
         if not name:
             continue
+
+        # Exact match
         if name.lower() in existing_catalog:
-            logger.debug("Skipping duplicate entity %r (already in catalog)", name)
+            logger.debug("Skipping duplicate entity %r (exact match in catalog)", name)
             continue
+
+        # Normalized match (singular/plural, articles)
+        normalized = _normalize_for_dedup(name)
+        if normalized in norm_to_catalog:
+            logger.debug(
+                "Skipping duplicate entity %r (normalized match: %r)",
+                name, norm_to_catalog[normalized],
+            )
+            continue
+
+        # Name appears as an alias of an existing entity
+        if name.lower() in alias_to_catalog:
+            logger.debug(
+                "Skipping duplicate entity %r (alias of %r)",
+                name, alias_to_catalog[name.lower()],
+            )
+            continue
+
         kind = entity.get("kind", "").lower()
         if kind not in _ENTITY_KINDS:
             logger.debug("Unknown entity kind %r for %r; skipping", kind, name)
@@ -616,7 +666,7 @@ def infer_relationships(
 
 # IMPORTANT: Bump when the _SCENE_ANALYSIS_SYSTEM prompt or schema changes,
 # otherwise stale cached results will be served silently.
-_SCENE_ANALYSIS_VERSION = "v4"
+_SCENE_ANALYSIS_VERSION = "v5"
 
 _SCENE_ANALYSIS_SYSTEM = """\
 You are analyzing a passage from a Lone Wolf choose-your-own-adventure gamebook.
@@ -646,7 +696,7 @@ Rules:
 - evasion: Only if explicit evasion/escape rules are stated. Use rounds: 0 if evasion is allowed from the start of combat. Set evasion to null if none.
 - combat_modifiers: value is the numeric modifier (e.g. 2 for "+2 CS bonus"), or null for flags like undead/double_damage/helghast. enemy_mindblast means the enemy uses Mindblast against the hero (-2 CS unless hero has Mindshield). This is different from mindblast_immune on combat_encounters, which means the hero's Mindblast has no effect on the enemy.
 - conditions: Extract gate conditions from the choice text (e.g. "If you have the Kai Discipline of Tracking"). For OR conditions use JSON: {"any": ["Tracking", "Huntmastery"]}.
-- entities: Only clearly named entities, not generic references like "the guard" or "a merchant".
+- entities: Only clearly named, proper-noun entities. Exclude generic references ("the guard", "a merchant", "the door", "a creature", "horse", "man", "tree", "forest"). Use SINGULAR form always ("Giak" not "Giaks", "Ranger" not "Rangers"). Omit leading articles ("King" not "The King"). If an entity from the Already-extracted list appears in this scene, DO NOT re-extract it. When a character is first introduced by a generic title ("the wizard", "the old hermit") and their proper name is revealed in the same or later scene, use only the proper name and list the generic title as an alias (e.g. name="Banedon", aliases=["young wizard"]).
 - scene_flags: is_death = true if the scene ends the adventure in failure with no outgoing choices. is_victory = true if the scene completes the book/quest successfully. must_eat = true if the player must eat a meal. loses_backpack = true if the player loses their backpack contents. mindblast_immune = true if a combat enemy is immune to Mindblast. Default all to false.
 - Return empty arrays [] and null for absent fields. Do not invent mechanics not present in the text.
 
@@ -660,6 +710,9 @@ Input: "A Kraan swoops from the sky. It is immune to Mindblast. You must fight i
 Output: {"entities": [{"kind": "creature", "name": "Kraan", "description": "A flying reptilian creature", "aliases": []}], "relationships": [], "combat_encounters": [{"enemy_name": "Kraan", "combat_skill": 16, "endurance": 24, "ordinal": 1, "mindblast_immune": true, "condition_type": null, "condition_value": null}], "items": [{"item_name": "Sword", "item_type": "weapon", "quantity": 1, "action": "gain"}, {"item_name": "Gold Crowns", "item_type": "gold", "quantity": 7, "action": "gain"}], "random_outcomes": [], "evasion": {"rounds": 3, "target_scene": 85, "damage": 2}, "combat_modifiers": [], "conditions": [], "scene_flags": {"must_eat": true, "loses_backpack": false, "is_death": false, "is_victory": false, "mindblast_immune": true}}"""
 
 _SCENE_ANALYSIS_USER = """\
+Already-extracted entities (reuse these exact names, do not create duplicates):
+{existing_entities_summary}
+
 Book {book_number}, Scene {scene_number}:
 
 {narrative}
@@ -990,11 +1043,21 @@ def analyze_scene(
     else:
         choices_text = "(no choices — this may be a death or victory scene)"
 
+    # Build compact catalog summary for the prompt
+    if existing_catalog:
+        entity_summary = ", ".join(
+            f"{data.get('name', k)} ({data.get('kind', '?')})"
+            for k, data in sorted(existing_catalog.items())
+        )
+    else:
+        entity_summary = "(none yet)"
+
     user_prompt = _SCENE_ANALYSIS_USER.format(
         book_number=book_id,
         scene_number=scene_number,
         narrative=narrative[:3000],
         choices_text=choices_text,
+        existing_entities_summary=entity_summary,
     )
 
     try:

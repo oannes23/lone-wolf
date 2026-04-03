@@ -29,6 +29,7 @@ from app.models.taxonomy import (
     BookTransitionRule,
     GameObject,
     GameObjectRef,
+    GameObjectSceneAppearance,
 )
 from app.models.wizard import (
     CharacterWizardProgress,
@@ -57,6 +58,7 @@ __all__ = [
     "Discipline",
     "GameObject",
     "GameObjectRef",
+    "GameObjectSceneAppearance",
     "RandomOutcome",
     "Report",
     "Scene",

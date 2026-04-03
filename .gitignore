@@ -43,6 +43,14 @@ lone_wolf.db
 .env.*
 !.env.example
 
+# Exported / authored book data
+data/
+
 # Claude Code local settings
 .claude/
 _book_research/
+
+# Scratch / debug artifacts
+dedup_raw_response.txt
+dedup_report.json
+prompt.txt

@@ -35,7 +35,7 @@ _EFFECT_TYPE_CHECK = (
     ")"
 )
 _MODIFIER_TYPE_CHECK = (
-    "modifier_type IN ('cs_bonus', 'cs_penalty', 'double_damage', 'undead', 'enemy_mindblast')"
+    "modifier_type IN ('cs_bonus', 'cs_penalty', 'double_damage', 'undead', 'enemy_mindblast', 'helghast')"
 )
 _CHOICE_CONDITION_TYPE_CHECK = (
     "condition_type IS NULL OR condition_type IN ('discipline', 'item', 'gold', 'random', 'none')"
@@ -112,6 +112,9 @@ class Scene(Base):
     scene_items: Mapped[list[SceneItem]] = relationship("SceneItem", back_populates="scene")
     random_outcomes: Mapped[list[RandomOutcome]] = relationship(
         "RandomOutcome", back_populates="scene"
+    )
+    game_object_appearances = relationship(
+        "GameObjectSceneAppearance", back_populates="scene"
     )
 
 
